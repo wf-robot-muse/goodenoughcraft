@@ -201,19 +201,38 @@ func _physics_process(delta: float) -> void:
 			wish = wish.normalized()
 		velocity = wish * FLY_SPEED
 	else:
-		if not is_on_floor():
-			velocity.y = maxf(velocity.y - GRAVITY * delta, -MAX_FALL_SPEED)
-		elif Input.is_action_pressed("jump"):
-			velocity.y = JUMP_VELOCITY
+		var in_water := _voxel_at(global_position + Vector3(0.0, 0.4, 0.0)) == Blocks.WATER \
+			or _voxel_at(global_position + Vector3(0.0, 1.4, 0.0)) == Blocks.WATER
 		var basis := global_transform.basis
 		var wish := basis * input_dir
 		wish.y = 0.0
 		if wish.length() > 1.0:
 			wish = wish.normalized()
 		var speed := SPRINT_SPEED if Input.is_action_pressed("sprint") else WALK_SPEED
+		if in_water:
+			# Swimming: slow sink, hold jump to swim up, slower movement.
+			speed *= 0.55
+			if Input.is_action_pressed("jump"):
+				velocity.y = minf(velocity.y + 42.0 * delta, 4.2)
+			else:
+				velocity.y = maxf(velocity.y - 12.0 * delta, -2.6)
+		else:
+			if not is_on_floor():
+				velocity.y = maxf(velocity.y - GRAVITY * delta, -MAX_FALL_SPEED)
+			elif Input.is_action_pressed("jump"):
+				velocity.y = JUMP_VELOCITY
 		velocity.x = wish.x * speed
 		velocity.z = wish.z * speed
 	move_and_slide()
+
+
+func _voxel_at(pos: Vector3) -> int:
+	if terrain == null:
+		return Blocks.AIR
+	if _tool == null:
+		_tool = terrain.get_voxel_tool()
+		_tool.channel = VoxelBuffer.CHANNEL_TYPE
+	return _tool.get_voxel(Vector3i(floori(pos.x), floori(pos.y), floori(pos.z)))
 
 
 func _ground_below() -> bool:
