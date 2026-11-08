@@ -10,15 +10,15 @@ config_version=5
 
 [application]
 
-config/name="GodotFoundation"
-config/description="Godot 4.7 + Voxel Tools (godot_voxel 1.7) foundation project: a streaming blocky voxel terrain demo, built and exported entirely by GitHub Actions."
+config/name="VoxelGame"
+config/description="VoxelGame: a first-person voxel sandbox on Godot 4.7 + Voxel Tools (godot_voxel 1.7) — streaming blocky terrain, mine/place blocks, day/night cycle, persistent world. Built and exported entirely by GitHub Actions."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
 
 [dotnet]
 
-project/assembly_name="GodotFoundation"
+project/assembly_name="VoxelGame"
 
 [physics]
 
