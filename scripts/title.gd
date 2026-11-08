@@ -81,10 +81,7 @@ func _build_terrain() -> void:
 	terrain.generator = TitleGen.new()
 	terrain.mesher = VoxelMesherBlocky.new()
 	terrain.mesher.library = Blocks.build_library()
-	var material := StandardMaterial3D.new()
-	material.vertex_color_use_as_albedo = true
-	material.roughness = 1.0
-	terrain.material = material
+	terrain.material = Blocks.terrain_material()
 	terrain.view_distance = 160
 	terrain.lod_count = 3
 	terrain.voxel_bounds = AABB(Vector3(-128, -32, -128), Vector3(256, 96, 256))
