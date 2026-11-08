@@ -1,4 +1,4 @@
-name: Godot CI
+name: VoxelGame CI
 
 on:
   push:
@@ -65,47 +65,47 @@ jobs:
       - name: Export Windows
         run: |
           mkdir -p build/windows
-          "$GODOT_BIN" --headless --export-release "Windows Desktop" build/windows/GodotFoundation.exe
+          "$GODOT_BIN" --headless --export-release "Windows Desktop" build/windows/VoxelGame.exe
 
       - name: Export Linux
         run: |
           mkdir -p build/linux
-          "$GODOT_BIN" --headless --export-release "Linux" build/linux/GodotFoundation.x86_64
+          "$GODOT_BIN" --headless --export-release "Linux" build/linux/VoxelGame.x86_64
 
       - name: Export macOS
         run: |
           mkdir -p build/macos
-          "$GODOT_BIN" --headless --export-release "macOS" build/macos/GodotFoundation.zip
+          "$GODOT_BIN" --headless --export-release "macOS" build/macos/VoxelGame.zip
 
       - name: Export Android (debug APK)
         run: |
           mkdir -p build/android
-          "$GODOT_BIN" --headless --export-debug "Android" build/android/GodotFoundation.apk
+          "$GODOT_BIN" --headless --export-debug "Android" build/android/VoxelGame.apk
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: godot-windows
+          name: voxel-game-windows
           path: build/windows/
           if-no-files-found: error
 
       - name: Upload Linux build
         uses: actions/upload-artifact@v4
         with:
-          name: godot-linux
+          name: voxel-game-linux
           path: build/linux/
           if-no-files-found: error
 
       - name: Upload macOS build
         uses: actions/upload-artifact@v4
         with:
-          name: godot-macos
+          name: voxel-game-macos
           path: build/macos/
           if-no-files-found: error
 
       - name: Upload Android build
         uses: actions/upload-artifact@v4
         with:
-          name: godot-android
+          name: voxel-game-android
           path: build/android/*.apk
           if-no-files-found: error
