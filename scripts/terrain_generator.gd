@@ -18,7 +18,7 @@ const SAND_MAX_HEIGHT := 0
 const TREE_DENSITY := 0.006
 const CACTUS_DENSITY := 0.005
 const SEA_LEVEL := 1
-const CAVE_THRESHOLD := 0.58
+const CAVE_THRESHOLD := 0.45
 
 const BIOME_PLAINS := 0
 const BIOME_DESERT := 1
