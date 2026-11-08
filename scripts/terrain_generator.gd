@@ -1,5 +1,5 @@
 extends VoxelGeneratorScript
-## Terrain generator for VoxelGame: rolling hills with layered columns
+## Terrain generator for GoodEnoughCraft: rolling hills with layered columns
 ## (grass / dirt / stone), sandy lowlands, and sparse trees.
 ##
 ## Voxel Tools' built-in heightmap generators write the SDF channel (they
