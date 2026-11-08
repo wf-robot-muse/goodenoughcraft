@@ -1,20 +1,24 @@
 extends Node
-## Headless smoke test for the voxel foundation.
+## Headless smoke test for VoxelGame (Phase 1).
 ##
 ## Run by CI as: godot --headless --path . res://scenes/smoke_test.tscn
-## Loads the real demo scene, waits for the voxel terrain to generate and
-## mesh blocks around the viewer, then prints SMOKE PASS / SMOKE FAIL and
-## exits with code 0 / 1.
+## Loads the real game scene and verifies, in order: the Voxel Tools
+## classes exist, the terrain streams data and mesh blocks around the
+## player, the player falls and lands on the generated terrain (collision
+## streaming works), and a block edit round-trips through VoxelTool.
+## Prints SMOKE PASS / SMOKE FAIL and exits with code 0 / 1.
 
 const REQUIRED_CLASSES := [
 	"VoxelLodTerrain",
 	"VoxelMesherBlocky",
 	"VoxelBlockyLibrary",
 	"VoxelBlockyModelCube",
-	"VoxelGeneratorFlat",
+	"VoxelGeneratorScript",
+	"VoxelStreamRegionFiles",
 	"VoxelViewer",
 ]
-const MAX_WAIT_SECONDS := 30.0
+const TerrainGen := preload("res://scripts/terrain_generator.gd")
+const MAX_WAIT_SECONDS := 60.0
 
 
 func _ready() -> void:
@@ -32,21 +36,53 @@ func _ready() -> void:
 
 	var terrain := main.get_node_or_null("VoxelTerrain") as VoxelLodTerrain
 	if terrain == null:
-		_fail("Demo scene did not create the VoxelTerrain node")
+		_fail("Game scene did not create the VoxelTerrain node")
+		return
+	var player := main.get_node_or_null("Player") as CharacterBody3D
+	if player == null:
+		_fail("Game scene did not create the Player node")
 		return
 
+	# 1. Terrain streams blocks around the player.
 	var waited := 0.0
+	var data_blocks := 0
+	var mesh_blocks := 0
 	while waited < MAX_WAIT_SECONDS:
 		await get_tree().create_timer(0.5).timeout
 		waited += 0.5
-		var data_blocks := terrain.debug_get_data_block_count()
-		var mesh_blocks := terrain.debug_get_mesh_block_count()
+		data_blocks = terrain.debug_get_data_block_count()
+		mesh_blocks = terrain.debug_get_mesh_block_count()
 		if data_blocks > 0 and mesh_blocks > 0:
-			print("SMOKE PASS data_blocks=", data_blocks, " mesh_blocks=", mesh_blocks)
-			get_tree().quit(0)
-			return
+			break
+	if data_blocks == 0 or mesh_blocks == 0:
+		_fail("Terrain generated no blocks within %s seconds" % MAX_WAIT_SECONDS)
+		return
 
-	_fail("Terrain generated no blocks within %s seconds" % MAX_WAIT_SECONDS)
+	# 2. The player lands on the terrain (collision streaming works).
+	waited = 0.0
+	while waited < MAX_WAIT_SECONDS:
+		if player.is_on_floor():
+			break
+		await get_tree().create_timer(0.5).timeout
+		waited += 0.5
+	if not player.is_on_floor():
+		_fail("Player never landed on the terrain")
+		return
+
+	# 3. Block edit round-trip through VoxelTool near the spawn column.
+	var tool := terrain.get_voxel_tool()
+	tool.channel = VoxelBuffer.CHANNEL_TYPE
+	var ground := TerrainGen.surface_height(8, 8)
+	var cell := Vector3i(8, ground + 6, 8)
+	tool.set_voxel(cell, Blocks.BRICK)
+	var read_back: int = tool.get_voxel(cell)
+	tool.set_voxel(cell, Blocks.AIR)
+	if read_back != Blocks.BRICK:
+		_fail("Edit round-trip failed: set BRICK, read back %d" % read_back)
+		return
+
+	print("SMOKE PASS data_blocks=", data_blocks, " mesh_blocks=", mesh_blocks, " player_landed=true edit_roundtrip=true")
+	get_tree().quit(0)
 
 
 func _fail(reason: String) -> void:
