@@ -1,5 +1,5 @@
 extends Node
-## Headless smoke test for VoxelGame (Phase 1).
+## Headless smoke test for GoodEnoughCraft (Phase 1).
 ##
 ## Run by CI as: godot --headless --path . res://scenes/smoke_test.tscn
 ## Loads the real game scene and verifies, in order: the Voxel Tools
