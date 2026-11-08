@@ -8,7 +8,7 @@ var _name_label: Label
 var _flash_label: Label
 var _flash_time := 0.0
 
-const HINT := "Click to capture the mouse — WASD move · Space jump · Shift sprint\nLeft click mine · Right click place · 1-9 / wheel select block · F fly · Esc release"
+const HINT := "Click to capture the mouse — WASD move · Space jump · Shift sprint\nLeft click mine · Right click place · 1-9 / wheel select · F fly · L flashlight · Esc pause (all controls remappable in Settings)"
 
 
 func _ready() -> void:
