@@ -1,5 +1,5 @@
 extends Node3D
-## VoxelGame — Phase 1: playable voxel sandbox core.
+## GoodEnoughCraft — Phase 1: playable voxel sandbox core.
 ##
 ## A first-person voxel game on Godot 4.7 + Voxel Tools: streaming blocky
 ## terrain (rolling hills, sandy lowlands, trees), walk/jump or fly, mine
