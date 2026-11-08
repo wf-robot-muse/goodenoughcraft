@@ -1,4 +1,4 @@
-# VoxelGame
+# GoodEnoughCraft
 
 A first-person voxel sandbox game built on **Godot 4.7** with **Voxel Tools**
 (Zylann's `godot_voxel` 1.7 GDExtension) — the Minecraft-class stack chosen
@@ -34,7 +34,7 @@ Planks, Leaves, Sand, Brick — are defined in one registry
   block, and time of day go to `user://player.json`. Autosave runs every
   30 seconds and on exit; "World saved" flashes on screen.
 - To start a fresh world, delete the game's user data folder
-  (`VoxelGame` under Godot's `app_userdata` directory for your OS).
+  (`GoodEnoughCraft` under Godot's `app_userdata` directory for your OS).
 
 ## Project layout
 
@@ -56,8 +56,8 @@ Planks, Leaves, Sand, Brick — are defined in one registry
 Pushes to `main` run the workflow: it downloads Godot 4.7.2 and the export
 templates, imports the project, runs the smoke test, and exports
 **Windows, Linux, macOS, and a debug Android APK** as artifacts named
-`voxel-game-windows`, `voxel-game-linux`, `voxel-game-macos`,
-`voxel-game-android`. Release builds are attached to GitHub Releases.
+`goodenoughcraft-windows`, `goodenoughcraft-linux`, `goodenoughcraft-macos`,
+`goodenoughcraft-android`. Release builds are attached to GitHub Releases.
 
 Notes inherited from the foundation:
 
