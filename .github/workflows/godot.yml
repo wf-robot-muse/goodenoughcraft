@@ -1,0 +1,111 @@
+name: Godot CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_BIN: ${{ github.workspace }}/Godot_v4.7.2-stable_linux.x86_64
+
+jobs:
+  validate-and-export:
+    name: Validate and export
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (for the Android export)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download Godot editor and export templates
+        run: |
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          chmod +x "$GODOT_BIN"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -d "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          # The .tpz nests everything under templates/; Godot expects it flat.
+          mv "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/templates/"* "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+          "$GODOT_BIN" --version
+
+      - name: Set up Android SDK components and Godot editor settings
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+          mkdir -p "$HOME/.local/share/godot/keystores"
+          keytool -genkeypair -keystore "$HOME/.local/share/godot/keystores/debug.keystore" \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          # Generate a default editor settings file, then point it at this
+          # runner's JDK and Android SDK (headless exports read these paths
+          # from the settings file, not from environment variables).
+          "$GODOT_BIN" --headless --editor --quit --path . > /dev/null 2>&1 || true
+          SETTINGS="$HOME/.config/godot/editor_settings-4.7.tres"
+          sed -i "s|^export/android/java_sdk_path = .*|export/android/java_sdk_path = \"$JAVA_HOME\"|" "$SETTINGS"
+          sed -i "s|^export/android/android_sdk_path = .*|export/android/android_sdk_path = \"$ANDROID_HOME\"|" "$SETTINGS"
+          grep "export/android" "$SETTINGS"
+
+      - name: Import project (loads the Voxel Tools extension)
+        run: |
+          "$GODOT_BIN" --headless --import --path .
+
+      - name: Voxel smoke test
+        run: timeout 120 "$GODOT_BIN" --headless --path . res://scenes/smoke_test.tscn
+
+      - name: Export Windows
+        run: |
+          mkdir -p build/windows
+          "$GODOT_BIN" --headless --export-release "Windows Desktop" build/windows/GodotFoundation.exe
+
+      - name: Export Linux
+        run: |
+          mkdir -p build/linux
+          "$GODOT_BIN" --headless --export-release "Linux" build/linux/GodotFoundation.x86_64
+
+      - name: Export macOS
+        run: |
+          mkdir -p build/macos
+          "$GODOT_BIN" --headless --export-release "macOS" build/macos/GodotFoundation.zip
+
+      - name: Export Android (debug APK)
+        run: |
+          mkdir -p build/android
+          "$GODOT_BIN" --headless --export-debug "Android" build/android/GodotFoundation.apk
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-windows
+          path: build/windows/
+          if-no-files-found: error
+
+      - name: Upload Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-linux
+          path: build/linux/
+          if-no-files-found: error
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-macos
+          path: build/macos/
+          if-no-files-found: error
+
+      - name: Upload Android build
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-android
+          path: build/android/*.apk
+          if-no-files-found: error
