@@ -30,6 +30,8 @@ var _slots_header: Label
 var _status_label: Label
 var _settings: SettingsUI
 var _settings_center: CenterContainer
+var _export_dialog: FileDialog
+var _import_dialog: FileDialog
 
 var _selected_user: Dictionary = {}
 var _selected_world: Dictionary = {}
@@ -186,6 +188,29 @@ func _build_ui() -> void:
 	_settings_center.add_child(_settings)
 	_settings.closed.connect(func() -> void: _settings_center.visible = false)
 
+	_export_dialog = FileDialog.new()
+	_export_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_export_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_export_dialog.filters = PackedStringArray(["*.zip ; ZIP archive"])
+	_export_dialog.title = "Export profile as zip"
+	_export_dialog.file_selected.connect(_do_export)
+	layer.add_child(_export_dialog)
+
+	_import_dialog = FileDialog.new()
+	_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_import_dialog.filters = PackedStringArray(["*.zip ; ZIP archive"])
+	_import_dialog.title = "Import a profile zip"
+	_import_dialog.file_selected.connect(_do_import)
+	layer.add_child(_import_dialog)
+
+	_wire_clicks(layer)
+
+
+func _wire_clicks(root_node: Node) -> void:
+	for node in root_node.find_children("*", "Button", true, false):
+		(node as Button).pressed.connect(func() -> void: Game.play_sfx("ui_click"))
+
 
 func _screen_box(panel: PanelContainer, header_text: String) -> VBoxContainer:
 	var vbox := VBoxContainer.new()
@@ -230,6 +255,10 @@ func _build_profiles_screen(panel: PanelContainer) -> VBoxContainer:
 		["Select profile →", _select_profile],
 		["Rename", _rename_profile],
 		["Delete", _delete_profile],
+	])
+	_button_row(vbox, [
+		["Export profile…", _export_profile],
+		["Import profile…", _import_profile],
 	])
 	return vbox
 
@@ -470,3 +499,39 @@ func _play(slot: String) -> void:
 func _open_settings() -> void:
 	_settings.refresh()
 	_settings_center.visible = true
+
+
+# ---------------------------------------------------------- export/import
+
+func _export_profile() -> void:
+	var user := _picked_user()
+	if user.is_empty():
+		_status("Select a profile to export first.")
+		return
+	_export_dialog.set_meta("user_id", user["id"])
+	_export_dialog.current_file = "GoodEnoughCraft-" + str(
+		user.get("name", "profile")).validate_filename() + ".zip"
+	_export_dialog.popup_centered_ratio(0.6)
+
+
+func _do_export(path: String) -> void:
+	if Game.export_profile(str(_export_dialog.get_meta("user_id", "")), path):
+		_status("Profile exported: " + path)
+	else:
+		_status("Export failed — could not write that file.")
+
+
+func _import_profile() -> void:
+	var folder := Game.global_sync_folder()
+	if folder != "":
+		_import_dialog.current_dir = folder
+	_import_dialog.popup_centered_ratio(0.6)
+
+
+func _do_import(path: String) -> void:
+	var user := Game.import_profile(path)
+	if user.is_empty():
+		_status("That file is not a GoodEnoughCraft profile export.")
+	else:
+		_refresh_profiles()
+		_status("Imported profile: " + str(user.get("name", "")))

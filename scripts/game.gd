@@ -89,12 +89,58 @@ var current_world: Dictionary = {}
 var current_slot := ""
 var settings: Dictionary = {}
 
+var _music_player: AudioStreamPlayer
+var _sfx_players: Array[AudioStreamPlayer] = []
+var _sfx_streams: Dictionary = {}
+
+const SFX_NAMES := ["dig", "place", "break", "step", "splash", "ui_click"]
+const SYNC_PATH := "user://sync.json"
+
 
 func _ready() -> void:
 	_ensure_audio_buses()
 	profiles = _load_json_array(PROFILES_PATH)
 	_install_default_bindings()
 	_apply_volumes()
+	_setup_audio()
+
+
+func _setup_audio() -> void:
+	for sfx_name in SFX_NAMES:
+		var path: String = "res://assets/audio/" + sfx_name + ".wav"
+		if ResourceLoader.exists(path):
+			_sfx_streams[sfx_name] = load(path)
+	for i in 8:
+		var player := AudioStreamPlayer.new()
+		player.bus = "SFX"
+		add_child(player)
+		_sfx_players.append(player)
+	_music_player = AudioStreamPlayer.new()
+	_music_player.bus = "Music"
+	add_child(_music_player)
+	var music_path := "res://assets/audio/music_ambient.wav"
+	if ResourceLoader.exists(music_path):
+		var music_stream := load(music_path) as AudioStreamWAV
+		if music_stream != null:
+			# Loop the ambient track (set in code: the WAV importer's
+			# loop setting does not survive headless reimports).
+			music_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			music_stream.loop_begin = 0
+			music_stream.loop_end = int(music_stream.get_length() * music_stream.mix_rate)
+		_music_player.stream = music_stream
+		_music_player.play()
+
+
+## Play a sound effect from the pool (used by gameplay and UI alike).
+func play_sfx(sfx_name: String, pitch := 1.0) -> void:
+	if not _sfx_streams.has(sfx_name):
+		return
+	for player in _sfx_players:
+		if not player.playing:
+			player.stream = _sfx_streams[sfx_name]
+			player.pitch_scale = pitch
+			player.play()
+			return
 
 
 # ---------------------------------------------------------------- profiles
@@ -407,6 +453,123 @@ func set_volume(kind: String, value: float) -> void:
 
 
 # ------------------------------------------------------------------- misc
+
+# ---------------------------------------------------------- export/import
+## A profile export is a single .zip: a manifest.json at the root plus
+## the profile's settings.json, worlds.json, and every world/slot file.
+## It can live anywhere — USB stick, network share, a Drive/OneDrive/Git
+## sync folder — and imports back into a fresh profile.
+
+func find_user(user_id: String) -> Dictionary:
+	for user in profiles:
+		if user.get("id") == user_id:
+			return user
+	return {}
+
+
+func export_profile(user_id: String, dest_path: String) -> bool:
+	var user := find_user(user_id)
+	if user.is_empty():
+		return false
+	var packer := ZIPPacker.new()
+	if packer.open(dest_path) != OK:
+		return false
+	var manifest := {
+		"format": "goodenoughcraft-profile",
+		"version": SAVE_FORMAT_VERSION,
+		"game_version": GAME_VERSION,
+		"user_name": user.get("name", ""),
+		"exported_at": Time.get_datetime_string_from_system(),
+	}
+	packer.start_file("manifest.json")
+	packer.write_file(JSON.stringify(manifest, "\t").to_utf8_buffer())
+	packer.close_file()
+	_add_dir_to_zip(packer, user_dir(user_id), "")
+	packer.close()
+	return true
+
+
+func _add_dir_to_zip(packer: ZIPPacker, base: String, rel: String) -> void:
+	var dir := DirAccess.open(base + "/" + rel)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if entry != "." and entry != "..":
+			var child_rel := entry if rel == "" else rel + "/" + entry
+			if dir.current_is_dir():
+				_add_dir_to_zip(packer, base, child_rel)
+			else:
+				var bytes := FileAccess.get_file_as_bytes(base + "/" + child_rel)
+				packer.start_file(child_rel)
+				packer.write_file(bytes)
+				packer.close_file()
+		entry = dir.get_next()
+	dir.list_dir_end()
+
+
+func import_profile(zip_path: String) -> Dictionary:
+	var reader := ZIPReader.new()
+	if reader.open(zip_path) != OK:
+		return {}
+	var files := reader.get_files()
+	if not files.has("manifest.json"):
+		reader.close()
+		return {}
+	var parsed: Variant = JSON.parse_string(
+		reader.read_file("manifest.json").get_string_from_utf8())
+	if parsed is not Dictionary or parsed.get("format") != "goodenoughcraft-profile":
+		reader.close()
+		return {}
+	var user_name := str(parsed.get("user_name", "Imported profile"))
+	for user in profiles:
+		if user.get("name") == user_name:
+			user_name += " (imported)"
+			break
+	var user := {"id": _new_id("u"), "name": user_name}
+	for file_name in files:
+		if file_name == "manifest.json" or file_name.ends_with("/"):
+			continue
+		var dest := user_dir(user["id"]) + "/" + file_name
+		DirAccess.make_dir_recursive_absolute(
+			ProjectSettings.globalize_path(dest.get_base_dir()))
+		var out := FileAccess.open(dest, FileAccess.WRITE)
+		if out != null:
+			out.store_buffer(reader.read_file(file_name))
+	reader.close()
+	profiles.append(user)
+	_save_json(PROFILES_PATH, profiles)
+	return user
+
+
+# ------------------------------------------------------------------- sync
+## Optional per-user sync folder: after every world save the profile zip
+## is refreshed there, ready to be picked up by whatever syncs that
+## folder (or carried on USB). The folder path is also remembered
+## globally so the title screen can offer sync import before any
+## profile exists.
+
+func global_sync_folder() -> String:
+	return str(_load_json(SYNC_PATH).get("folder", ""))
+
+
+func set_sync_folder(folder: String) -> void:
+	settings["sync_folder"] = folder
+	save_settings()
+	_save_json(SYNC_PATH, {"folder": folder})
+
+
+func sync_export() -> void:
+	if current_user.is_empty():
+		return
+	var folder := str(settings.get("sync_folder", ""))
+	if folder == "" or not DirAccess.dir_exists_absolute(folder):
+		return
+	var dest := folder + "/GoodEnoughCraft-" + str(
+		current_user.get("name", "profile")).validate_filename() + ".zip"
+	export_profile(current_user["id"], dest)
+
 
 func _new_id(prefix: String) -> String:
 	return prefix + str(Time.get_ticks_msec()) + str(randi() % 100000)

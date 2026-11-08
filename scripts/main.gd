@@ -223,5 +223,6 @@ func _save_state(show_flash: bool) -> void:
 	if file != null:
 		file.store_string(JSON.stringify(data))
 	Game.stamp_manifest()
+	Game.sync_export()
 	if show_flash and hud != null:
 		hud.flash_message("World saved")

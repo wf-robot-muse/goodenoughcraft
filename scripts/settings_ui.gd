@@ -13,6 +13,7 @@ var _capturing := ""
 var _capture_button: Button
 var _music_slider: HSlider
 var _sfx_slider: HSlider
+var _sync_edit: LineEdit
 
 
 func _ready() -> void:
@@ -37,6 +38,22 @@ func _ready() -> void:
 
 	_music_slider = _add_volume_row(vbox, "Music volume", "music_volume")
 	_sfx_slider = _add_volume_row(vbox, "Sound effects volume", "sfx_volume")
+
+	var sync_row := HBoxContainer.new()
+	var sync_label := Label.new()
+	sync_label.text = "Sync folder"
+	sync_label.custom_minimum_size = Vector2(190, 0)
+	sync_row.add_child(sync_label)
+	_sync_edit = LineEdit.new()
+	_sync_edit.placeholder_text = "Folder auto-exported after every save (Drive / OneDrive / USB / network share)"
+	_sync_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sync_row.add_child(_sync_edit)
+	var sync_save := Button.new()
+	sync_save.text = "Save"
+	sync_save.pressed.connect(func() -> void:
+		Game.set_sync_folder(_sync_edit.text.strip_edges()))
+	sync_row.add_child(sync_save)
+	vbox.add_child(sync_row)
 
 	var controls_label := Label.new()
 	controls_label.text = "Controls — select a binding, then press a key, mouse button, or gamepad input. Esc cancels."
@@ -98,6 +115,7 @@ func _add_volume_row(parent: VBoxContainer, text: String, kind: String) -> HSlid
 func refresh() -> void:
 	_music_slider.value = float(Game.settings.get("music_volume", 0.7)) * 100.0
 	_sfx_slider.value = float(Game.settings.get("sfx_volume", 0.9)) * 100.0
+	_sync_edit.text = str(Game.settings.get("sync_folder", ""))
 	_refresh_bindings()
 
 

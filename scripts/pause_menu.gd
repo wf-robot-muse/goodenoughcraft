@@ -49,6 +49,9 @@ func _ready() -> void:
 	center.add_child(_settings)
 	add_child(center)
 
+	for node in find_children("*", "Button", true, false):
+		(node as Button).pressed.connect(func() -> void: Game.play_sfx("ui_click"))
+
 	visible = false
 
 

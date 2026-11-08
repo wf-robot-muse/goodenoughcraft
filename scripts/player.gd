@@ -39,6 +39,9 @@ var _lamp: SpotLight3D
 var _tool: VoxelTool
 var _cooldown := 0.0
 var _pad_mode := false
+var _step_acc := 0.0
+var _was_in_water := false
+var _last_pos := Vector3.ZERO
 # At spawn, terrain collisions near the player may not exist yet. The
 # player hovers (no gravity) until a downward ray finds generated ground,
 # so it can never fall through a still-loading world.
@@ -203,6 +206,9 @@ func _physics_process(delta: float) -> void:
 	else:
 		var in_water := _voxel_at(global_position + Vector3(0.0, 0.4, 0.0)) == Blocks.WATER \
 			or _voxel_at(global_position + Vector3(0.0, 1.4, 0.0)) == Blocks.WATER
+		if in_water and not _was_in_water:
+			Game.play_sfx("splash")
+		_was_in_water = in_water
 		var basis := global_transform.basis
 		var wish := basis * input_dir
 		wish.y = 0.0
@@ -224,6 +230,16 @@ func _physics_process(delta: float) -> void:
 		velocity.x = wish.x * speed
 		velocity.z = wish.z * speed
 	move_and_slide()
+
+	# Footsteps while walking on solid ground.
+	var flat_distance := Vector2(
+		global_position.x - _last_pos.x, global_position.z - _last_pos.z).length()
+	if is_on_floor() and not flying:
+		_step_acc += flat_distance
+		if _step_acc > 2.3:
+			_step_acc = 0.0
+			Game.play_sfx("step", randf_range(0.9, 1.1))
+	_last_pos = global_position
 
 
 func _voxel_at(pos: Vector3) -> int:
@@ -256,6 +272,7 @@ func _try_action(mine: bool) -> void:
 		return
 	if mine:
 		_tool.set_voxel(hit.position, Blocks.AIR)
+		Game.play_sfx("break", randf_range(0.92, 1.08))
 	else:
 		var cell: Vector3i = hit.previous_position
 		# Never place a block inside the player's own body.
@@ -264,3 +281,4 @@ func _try_action(mine: bool) -> void:
 		if player_box.intersects(cell_box):
 			return
 		_tool.set_voxel(cell, selected_block())
+		Game.play_sfx("place", randf_range(0.95, 1.05))
