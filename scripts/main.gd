@@ -1,20 +1,21 @@
 extends Node3D
-## GoodEnoughCraft — Phase 1: playable voxel sandbox core.
+## GoodEnoughCraft — the game scene: playable voxel sandbox core.
 ##
 ## A first-person voxel game on Godot 4.7 + Voxel Tools: streaming blocky
-## terrain (rolling hills, sandy lowlands, trees), walk/jump or fly, mine
-## and place blocks from a 9-slot hotbar, a day/night cycle, and a
-## persistent world. World edits are stored by Voxel Tools' region-file
-## stream under user://world; player position, selection, and time of day
-## are stored in user://player.json. Autosaves run every 30 seconds and on
-## exit. Everything is built in code so the project stays plain text.
+## terrain, walk/jump or fly, mine and place blocks from a hotbar, a
+## day/night cycle, and a persistent world. Which user/world/save slot is
+## being played comes from the Game autoload (set by the title screen);
+## without a title context a throwaway dev world is used. World edits are
+## stored by Voxel Tools' region-file stream in the active slot directory;
+## player state (position, selection, time of day, flashlight) is stored
+## in the slot's player.json. Autosaves run every 30 seconds and on exit.
+## Everything is built in code so the project stays plain text.
 
 const TerrainGen := preload("res://scripts/terrain_generator.gd")
 const PlayerScript := preload("res://scripts/player.gd")
 const HudScript := preload("res://scripts/hud.gd")
+const PauseMenuScript := preload("res://scripts/pause_menu.gd")
 
-const WORLD_DIR := "user://world"
-const SAVE_PATH := "user://player.json"
 const DAY_LENGTH := 600.0 # seconds per full day/night cycle
 const AUTOSAVE_INTERVAL := 30.0
 
@@ -26,13 +27,17 @@ var time_of_day := 0.30 # 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
 var _sun: DirectionalLight3D
 var _environment: Environment
 var _save_timer := 0.0
+var _pause_menu: CanvasLayer
+var _paused := false
 
 
 func _ready() -> void:
+	TerrainGen.active_seed = Game.active_seed()
 	_build_environment()
 	_build_terrain()
 	_build_player()
 	_build_hud()
+	_build_pause_menu()
 	_apply_time_of_day()
 
 
@@ -63,7 +68,7 @@ func _build_environment() -> void:
 
 func _build_terrain() -> void:
 	var stream := VoxelStreamRegionFiles.new()
-	stream.directory = WORLD_DIR
+	stream.directory = Game.active_slot_dir()
 	stream.save_generator_output = false
 
 	terrain = VoxelLodTerrain.new()
@@ -110,6 +115,8 @@ func _build_player() -> void:
 		player.selected_index = clampi(int(state["sel"]), 0, Blocks.HOTBAR.size() - 1)
 	if state.has("fly"):
 		player.flying = bool(state["fly"])
+	player.set_flashlight(bool(state.get("lamp", false)))
+	player.pause_requested.connect(_open_pause)
 
 
 func _find_spawn() -> Vector3:
@@ -129,6 +136,38 @@ func _build_hud() -> void:
 	add_child(hud)
 	player.selection_changed.connect(hud.set_selected)
 	hud.set_selected(player.selected_index)
+
+
+func _build_pause_menu() -> void:
+	_pause_menu = PauseMenuScript.new()
+	add_child(_pause_menu)
+	_pause_menu.resume_requested.connect(_close_pause)
+	_pause_menu.save_requested.connect(func() -> void:
+		_save_state(true)
+		_close_pause())
+	_pause_menu.quit_requested.connect(_quit_to_title)
+
+
+func _open_pause() -> void:
+	if _paused:
+		return
+	_paused = true
+	_save_state(false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_pause_menu.open()
+	get_tree().paused = true
+
+
+func _close_pause() -> void:
+	_paused = false
+	_pause_menu.close()
+	get_tree().paused = false
+
+
+func _quit_to_title() -> void:
+	_save_state(false)
+	get_tree().paused = false
+	get_tree().change_scene_to_file("res://scenes/title.tscn")
 
 
 func _process(delta: float) -> void:
@@ -159,9 +198,10 @@ func _notification(what: int) -> void:
 
 
 func _load_state() -> Dictionary:
-	if not FileAccess.file_exists(SAVE_PATH):
+	var path := Game.active_player_path()
+	if not FileAccess.file_exists(path):
 		return {}
-	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return {}
 	var parsed: Variant = JSON.parse_string(file.get_as_text())
@@ -181,9 +221,11 @@ func _save_state(show_flash: bool) -> void:
 		"sel": player.selected_index,
 		"time": time_of_day,
 		"fly": player.flying,
+		"lamp": player.flashlight_on,
 	}
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var file := FileAccess.open(Game.active_player_path(), FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(data))
+	Game.stamp_manifest()
 	if show_flash and hud != null:
 		hud.flash_message("World saved")
