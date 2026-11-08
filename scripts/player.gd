@@ -1,13 +1,19 @@
 extends CharacterBody3D
 ## First-person player: walk/jump with terrain collision, an optional fly
-## mode, mouse-look, and block interaction (mine/place) through Voxel
-## Tools' VoxelTool raycast. Creative-style: every hotbar block is
-## available in unlimited quantity (survival/inventory is a later phase).
+## mode, mouse or right-stick look, a toggleable flashlight, and block
+## interaction (mine/place) through Voxel Tools' VoxelTool raycast.
+## Creative-style: every hotbar block is available in unlimited quantity
+## (survival/inventory is a later phase).
+##
+## All input goes through the named InputMap actions installed by the
+## Game autoload, so every control can be remapped per user (keyboard,
+## mouse, and gamepad) from the settings screen.
 ##
 ## The node is built entirely in code by main.gd; this script creates its
-## own collision shape, head/camera, and VoxelViewer in _ready.
+## own collision shape, head/camera/flashlight, and VoxelViewer in _ready.
 
 signal selection_changed(index: int)
+signal pause_requested
 
 const TerrainGen := preload("res://scripts/terrain_generator.gd")
 
@@ -20,15 +26,19 @@ const REACH := 8.0
 const ACTION_DELAY := 0.22
 const MAX_FALL_SPEED := 45.0
 const GROUND_WAIT_TIMEOUT := 5.0
+const STICK_LOOK_SPEED := 2.4
 
 var terrain: VoxelLodTerrain
 var selected_index := 0
 var flying := false
+var flashlight_on := false
 
 var _head: Node3D
 var _camera: Camera3D
+var _lamp: SpotLight3D
 var _tool: VoxelTool
 var _cooldown := 0.0
+var _pad_mode := false
 # At spawn, terrain collisions near the player may not exist yet. The
 # player hovers (no gravity) until a downward ray finds generated ground,
 # so it can never fall through a still-loading world.
@@ -52,6 +62,15 @@ func _ready() -> void:
 	_camera = Camera3D.new()
 	_camera.current = true
 	_head.add_child(_camera)
+
+	# Flashlight: a spotlight that follows the look direction.
+	_lamp = SpotLight3D.new()
+	_lamp.spot_range = 34.0
+	_lamp.spot_angle = 30.0
+	_lamp.light_energy = 2.6
+	_lamp.shadow_enabled = false
+	_lamp.visible = flashlight_on
+	_head.add_child(_lamp)
 
 	# The viewer makes the terrain stream (and generate collisions) here.
 	var viewer := VoxelViewer.new()
@@ -79,34 +98,53 @@ func set_look(yaw: float, pitch: float) -> void:
 		_head.rotation.x = clampf(pitch, -1.55, 1.55)
 
 
+func set_flashlight(on: bool) -> void:
+	flashlight_on = on
+	if _lamp != null:
+		_lamp.visible = on
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed:
-		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-			# First click just captures the mouse; it must not also mine.
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-			return
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_change_selection(-1)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_change_selection(1)
-		elif event.button_index == MOUSE_BUTTON_LEFT:
-			_try_action(true)
-			_cooldown = ACTION_DELAY
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			_try_action(false)
-			_cooldown = ACTION_DELAY
-	elif event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_ESCAPE:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-		elif event.keycode == KEY_F:
-			flying = not flying
-			velocity = Vector3.ZERO
-		elif event.keycode >= KEY_1 and event.keycode <= KEY_9:
-			var index: int = event.keycode - KEY_1
-			if index < Blocks.HOTBAR.size():
-				selected_index = index
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		_pad_mode = true
+	elif event is InputEventKey or event is InputEventMouseButton:
+		_pad_mode = false
+
+	if event.is_action_pressed("pause"):
+		pause_requested.emit()
+		return
+
+	# The first mine click just captures the mouse; it must not also mine.
+	if event.is_action_pressed("mine") and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not _pad_mode:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		return
+
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not _pad_mode:
+		return
+
+	if event.is_action_pressed("mine"):
+		_try_action(true)
+		_cooldown = ACTION_DELAY
+	elif event.is_action_pressed("place"):
+		_try_action(false)
+		_cooldown = ACTION_DELAY
+	elif event.is_action_pressed("hotbar_next"):
+		_change_selection(1)
+	elif event.is_action_pressed("hotbar_prev"):
+		_change_selection(-1)
+	elif event.is_action_pressed("fly_toggle"):
+		flying = not flying
+		velocity = Vector3.ZERO
+	elif event.is_action_pressed("flashlight"):
+		set_flashlight(not flashlight_on)
+	else:
+		for i in range(1, Blocks.HOTBAR.size() + 1):
+			if event.is_action_pressed("hotbar_" + str(i)):
+				selected_index = i - 1
 				selection_changed.emit(selected_index)
-	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+				break
+
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		rotate_y(-event.relative.x * 0.0025)
 		_head.rotation.x = clampf(_head.rotation.x - event.relative.y * 0.0025, -1.55, 1.55)
 
@@ -133,32 +171,31 @@ func _physics_process(delta: float) -> void:
 		_ground_wait = 0.0
 		return
 
+	# Right-stick look (gamepad).
+	var look := Input.get_vector("look_left", "look_right", "look_up", "look_down")
+	if look.length() > 0.1:
+		rotate_y(-look.x * STICK_LOOK_SPEED * delta)
+		_head.rotation.x = clampf(_head.rotation.x - look.y * STICK_LOOK_SPEED * delta, -1.55, 1.55)
+
 	# Held-button mining/placing repeats at a fixed rate.
 	_cooldown -= delta
-	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _cooldown <= 0.0:
-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or _pad_mode) and _cooldown <= 0.0:
+		if Input.is_action_pressed("mine"):
 			_try_action(true)
 			_cooldown = ACTION_DELAY
-		elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		elif Input.is_action_pressed("place"):
 			_try_action(false)
 			_cooldown = ACTION_DELAY
 
-	var input_dir := Vector3.ZERO
-	if Input.is_physical_key_pressed(KEY_W):
-		input_dir.z -= 1.0
-	if Input.is_physical_key_pressed(KEY_S):
-		input_dir.z += 1.0
-	if Input.is_physical_key_pressed(KEY_A):
-		input_dir.x -= 1.0
-	if Input.is_physical_key_pressed(KEY_D):
-		input_dir.x += 1.0
+	var move := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var input_dir := Vector3(move.x, 0.0, move.y)
 
 	if flying:
 		var basis := _camera.global_transform.basis
-		var wish := basis * Vector3(input_dir.x, 0.0, input_dir.z)
-		if Input.is_physical_key_pressed(KEY_SPACE):
+		var wish := basis * input_dir
+		if Input.is_action_pressed("fly_up"):
 			wish += Vector3.UP
-		if Input.is_physical_key_pressed(KEY_CTRL):
+		if Input.is_action_pressed("fly_down"):
 			wish -= Vector3.UP
 		if wish.length() > 1.0:
 			wish = wish.normalized()
@@ -166,14 +203,14 @@ func _physics_process(delta: float) -> void:
 	else:
 		if not is_on_floor():
 			velocity.y = maxf(velocity.y - GRAVITY * delta, -MAX_FALL_SPEED)
-		elif Input.is_physical_key_pressed(KEY_SPACE):
+		elif Input.is_action_pressed("jump"):
 			velocity.y = JUMP_VELOCITY
 		var basis := global_transform.basis
-		var wish := basis * Vector3(input_dir.x, 0.0, input_dir.z)
+		var wish := basis * input_dir
 		wish.y = 0.0
 		if wish.length() > 1.0:
 			wish = wish.normalized()
-		var speed := SPRINT_SPEED if Input.is_physical_key_pressed(KEY_SHIFT) else WALK_SPEED
+		var speed := SPRINT_SPEED if Input.is_action_pressed("sprint") else WALK_SPEED
 		velocity.x = wish.x * speed
 		velocity.z = wish.z * speed
 	move_and_slide()
