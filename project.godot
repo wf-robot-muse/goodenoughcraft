@@ -12,9 +12,13 @@ config_version=5
 
 config/name="GoodEnoughCraft"
 config/description="GoodEnoughCraft: a first-person voxel sandbox on Godot 4.7 + Voxel Tools (godot_voxel 1.7) — streaming blocky terrain, mine/place blocks, day/night cycle, persistent world. Built and exported entirely by GitHub Actions."
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/title.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
+
+[autoload]
+
+Game="*res://scripts/game.gd"
 
 [dotnet]
 
