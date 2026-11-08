@@ -8,7 +8,7 @@ var _name_label: Label
 var _flash_label: Label
 var _flash_time := 0.0
 
-const HINT := "Click to capture the mouse — WASD move · Space jump · Shift sprint\nLeft click mine · Right click place · 1-9 / wheel select · F fly · L flashlight · Esc pause (all controls remappable in Settings)"
+const HINT := "Click to capture the mouse — WASD move · Space jump · Shift sprint\nLeft click mine · Right click place · 1-0 / wheel select · F fly · L flashlight · Esc pause (all controls remappable in Settings)"
 
 
 func _ready() -> void:
@@ -59,8 +59,8 @@ func _ready() -> void:
 
 	var bar := HBoxContainer.new()
 	bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	bar.offset_left = -250
-	bar.offset_right = 250
+	bar.offset_left = -285
+	bar.offset_right = 285
 	bar.offset_top = -72
 	bar.offset_bottom = -16
 	bar.alignment = BoxContainer.ALIGNMENT_CENTER
