@@ -14,16 +14,22 @@ const AMPLITUDE := 14.0
 const SAND_MAX_HEIGHT := 0
 const TREE_DENSITY := 0.006
 
+## The world seed in use. main.gd sets this from the active world's seed
+## before the terrain is built; the default keeps the smoke test and any
+## direct scene runs on the original Phase 1 world.
+static var active_seed := NOISE_SEED
+
 var _noise := FastNoiseLite.new()
 static var _shared_noise: FastNoiseLite
+static var _shared_seed := -1
 
 
 func _init() -> void:
-	_configure(_noise)
+	_configure(_noise, active_seed)
 
 
-static func _configure(noise: FastNoiseLite) -> void:
-	noise.seed = NOISE_SEED
+static func _configure(noise: FastNoiseLite, seed_value: int) -> void:
+	noise.seed = seed_value
 	noise.noise_type = FastNoiseLite.TYPE_PERLIN
 	noise.frequency = 0.012
 	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
@@ -32,9 +38,10 @@ static func _configure(noise: FastNoiseLite) -> void:
 
 
 static func _get_shared_noise() -> FastNoiseLite:
-	if _shared_noise == null:
+	if _shared_noise == null or _shared_seed != active_seed:
 		_shared_noise = FastNoiseLite.new()
-		_configure(_shared_noise)
+		_configure(_shared_noise, active_seed)
+		_shared_seed = active_seed
 	return _shared_noise
 
 
