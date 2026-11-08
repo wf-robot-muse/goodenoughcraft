@@ -1,11 +1,15 @@
 class_name Blocks
 extends RefCounted
 ## Block registry: the single source of truth for voxel type ids, names,
-## and colors. The terrain generator, the block library, and the hotbar all
-## read from here, so adding a block type is a one-line change.
+## colors, and texture tiles. The terrain generator, the block library,
+## the HUD, and the title logo all read from here.
 ##
-## Id 0 is always air (the empty model). Models are plain colored cubes for
-## now; a texture atlas replaces the flat colors in a later phase.
+## Id 0 is always air (the empty model). Models are textured cubes whose
+## faces sample assets/textures/atlas.png (generated procedurally by
+## tools/make_atlas.py). Tile coordinates below are in tiles, matching
+## that script's TILES map; the atlas is 8x4 tiles of 32x32.
+##
+## Flat colors are kept for the HUD hotbar swatches and UI accents.
 
 const AIR := 0
 const GRASS := 1
@@ -17,8 +21,40 @@ const PLANKS := 6
 const LEAVES := 7
 const SAND := 8
 const BRICK := 9
+const WATER := 10
+const COAL_ORE := 11
+const IRON_ORE := 12
+const GOLD_ORE := 13
+const SNOW_GRASS := 14
+const GLASS := 15
+const CACTUS := 16
 
-# id -> [name, color]
+const ATLAS_PATH := "res://assets/textures/atlas.png"
+const ATLAS_SIZE := Vector2i(8, 4)
+
+# Tile coordinates (in tiles) inside the atlas.
+const T_GRASS_TOP := Vector2i(0, 0)
+const T_GRASS_SIDE := Vector2i(1, 0)
+const T_DIRT := Vector2i(2, 0)
+const T_STONE := Vector2i(3, 0)
+const T_COBBLE := Vector2i(4, 0)
+const T_LOG_SIDE := Vector2i(5, 0)
+const T_LOG_TOP := Vector2i(6, 0)
+const T_PLANKS := Vector2i(7, 0)
+const T_LEAVES := Vector2i(0, 1)
+const T_SAND := Vector2i(1, 1)
+const T_BRICK := Vector2i(2, 1)
+const T_GLASS := Vector2i(3, 1)
+const T_SNOW_TOP := Vector2i(4, 1)
+const T_SNOW_SIDE := Vector2i(5, 1)
+const T_COAL_ORE := Vector2i(6, 1)
+const T_IRON_ORE := Vector2i(7, 1)
+const T_GOLD_ORE := Vector2i(0, 2)
+const T_CACTUS_SIDE := Vector2i(1, 2)
+const T_CACTUS_TOP := Vector2i(2, 2)
+const T_WATER := Vector2i(3, 2)
+
+# id -> [name, hud color]
 const DEFS := {
 	GRASS: ["Grass", Color(0.30, 0.60, 0.25)],
 	STONE: ["Stone", Color(0.55, 0.55, 0.58)],
@@ -29,10 +65,39 @@ const DEFS := {
 	LEAVES: ["Leaves", Color(0.20, 0.44, 0.17)],
 	SAND: ["Sand", Color(0.82, 0.71, 0.46)],
 	BRICK: ["Brick", Color(0.58, 0.27, 0.21)],
+	WATER: ["Water", Color(0.20, 0.43, 0.78)],
+	COAL_ORE: ["Coal Ore", Color(0.30, 0.30, 0.32)],
+	IRON_ORE: ["Iron Ore", Color(0.72, 0.58, 0.46)],
+	GOLD_ORE: ["Gold Ore", Color(0.85, 0.68, 0.25)],
+	SNOW_GRASS: ["Snowy Grass", Color(0.90, 0.93, 0.95)],
+	GLASS: ["Glass", Color(0.81, 0.91, 0.93)],
+	CACTUS: ["Cactus", Color(0.23, 0.50, 0.21)],
 }
 
-# Hotbar slots in display order (number keys 1-9).
-const HOTBAR: Array[int] = [GRASS, DIRT, STONE, COBBLE, LOG, PLANKS, LEAVES, SAND, BRICK]
+# id -> [side tile, top tile, bottom tile]
+const TILES := {
+	GRASS: [T_GRASS_SIDE, T_GRASS_TOP, T_DIRT],
+	STONE: [T_STONE, T_STONE, T_STONE],
+	DIRT: [T_DIRT, T_DIRT, T_DIRT],
+	COBBLE: [T_COBBLE, T_COBBLE, T_COBBLE],
+	LOG: [T_LOG_SIDE, T_LOG_TOP, T_LOG_TOP],
+	PLANKS: [T_PLANKS, T_PLANKS, T_PLANKS],
+	LEAVES: [T_LEAVES, T_LEAVES, T_LEAVES],
+	SAND: [T_SAND, T_SAND, T_SAND],
+	BRICK: [T_BRICK, T_BRICK, T_BRICK],
+	WATER: [T_WATER, T_WATER, T_WATER],
+	COAL_ORE: [T_COAL_ORE, T_COAL_ORE, T_COAL_ORE],
+	IRON_ORE: [T_IRON_ORE, T_IRON_ORE, T_IRON_ORE],
+	GOLD_ORE: [T_GOLD_ORE, T_GOLD_ORE, T_GOLD_ORE],
+	SNOW_GRASS: [T_SNOW_SIDE, T_SNOW_TOP, T_DIRT],
+	GLASS: [T_GLASS, T_GLASS, T_GLASS],
+	CACTUS: [T_CACTUS_SIDE, T_CACTUS_TOP, T_CACTUS_TOP],
+}
+
+# Hotbar slots in display order (hotbar_1 .. hotbar_10 actions).
+const HOTBAR: Array[int] = [GRASS, DIRT, STONE, COBBLE, LOG, PLANKS, LEAVES, SAND, BRICK, GLASS]
+
+static var _material: StandardMaterial3D
 
 
 static func block_name(id: int) -> String:
@@ -47,6 +112,21 @@ static func block_color(id: int) -> Color:
 	return Color(0, 0, 0, 0)
 
 
+static func is_water(id: int) -> bool:
+	return id == WATER
+
+
+## The shared terrain material: the atlas as albedo with nearest-neighbor
+## filtering for a crisp pixel look. One instance is reused everywhere.
+static func terrain_material() -> Material:
+	if _material == null:
+		_material = StandardMaterial3D.new()
+		_material.albedo_texture = load(ATLAS_PATH) as Texture2D
+		_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
+		_material.roughness = 1.0
+	return _material
+
+
 static func build_library() -> VoxelBlockyLibrary:
 	var library := VoxelBlockyLibrary.new()
 	library.add_model(VoxelBlockyModelEmpty.new())
@@ -55,7 +135,17 @@ static func build_library() -> VoxelBlockyLibrary:
 	ids.sort()
 	for id in ids:
 		var model := VoxelBlockyModelCube.new()
-		model.color = DEFS[id][1]
+		model.atlas_size_in_tiles = ATLAS_SIZE
+		var tiles: Array = TILES[id]
+		model.tile_left = tiles[0]
+		model.tile_right = tiles[0]
+		model.tile_back = tiles[0]
+		model.tile_front = tiles[0]
+		model.tile_top = tiles[1]
+		model.tile_bottom = tiles[2]
+		if id == WATER:
+			# Water is not solid: the player swims through it.
+			model.collision_aabbs = []
 		library.add_model(model)
 	library.bake()
 	return library
