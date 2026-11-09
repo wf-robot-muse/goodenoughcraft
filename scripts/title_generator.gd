@@ -13,9 +13,9 @@ const LINE1_TOP := 18
 const LINE2_TOP := 10
 const LETTER_PITCH := 6
 const LETTER_PALETTE: Array[int] = [
-	Blocks.BRICK, Blocks.PLANKS, Blocks.STONE, Blocks.COBBLE, Blocks.LOG,
-	Blocks.GRASS, Blocks.SAND, Blocks.DIRT, Blocks.LEAVES, Blocks.BRICK,
-	Blocks.PLANKS, Blocks.STONE, Blocks.COBBLE, Blocks.LOG, Blocks.GRASS,
+	Blocks.BRICK, Blocks.GOLD_ORE, Blocks.LEAVES, Blocks.PLANKS, Blocks.WATER,
+	Blocks.CACTUS, Blocks.GRASS, Blocks.LOG, Blocks.IRON_ORE, Blocks.BRICK,
+	Blocks.LEAVES, Blocks.GOLD_ORE, Blocks.WATER, Blocks.PLANKS, Blocks.CACTUS,
 ]
 
 const GLYPHS := {
