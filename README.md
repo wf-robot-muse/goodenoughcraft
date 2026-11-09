@@ -125,15 +125,22 @@ melody). Music and sound-effect volumes are separate per-profile settings.
 
 Pushes to `main` run the workflow: it downloads Godot 4.7.2 and the export
 templates, imports the project, runs the smoke test, and exports
-**Windows, Linux, macOS, and a debug Android APK** as artifacts named
+**Windows, Linux, macOS, and a signed release Android APK** as artifacts named
 `goodenoughcraft-windows`, `goodenoughcraft-linux`, `goodenoughcraft-macos`,
 `goodenoughcraft-android`. Release builds are attached to GitHub Releases.
 
 Notes inherited from the foundation:
 
-- The Android debug APK packs the addon's editor-variant voxel libraries
-  (the addon ships no `template_debug` libraries); a signed release APK
-  needs an upload keystore in GitHub Secrets and `--export-release`.
+- The Android build is a **release APK signed with one fixed keystore**
+  (repo secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`), so every build carries
+  the same signature and installs over the previous one. The release
+  export also packs the correct `template_release` Voxel Tools libraries
+  (the addon ships no `template_debug` libraries, which is why debug
+  exports packed the editor variants). The same signed APK runs on
+  Android and on 64-bit **Fire OS 7/8** tablets (e.g. Fire HD 10, 2019+):
+  enable "Apps from Unknown Sources" on the tablet and install the APK
+  directly — no Google Play Services are required.
 - Windows builds are currently unsigned: SmartScreen and antivirus
   heuristics may warn on first run (Microsoft Defender's machine-learning
   model flagged the v0.2.1 zip as `Trojan:Script/Wacatac.B!ml` — a false
