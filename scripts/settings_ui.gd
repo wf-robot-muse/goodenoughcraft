@@ -14,6 +14,8 @@ var _capture_button: Button
 var _music_slider: HSlider
 var _sfx_slider: HSlider
 var _sync_edit: LineEdit
+var _close_button: Button
+var _pad_readout: Label
 
 
 func _ready() -> void:
@@ -34,6 +36,7 @@ func _ready() -> void:
 	close_button.text = "Close"
 	close_button.pressed.connect(func() -> void: closed.emit())
 	header.add_child(close_button)
+	_close_button = close_button
 	vbox.add_child(header)
 
 	_music_slider = _add_volume_row(vbox, "Music volume", "music_volume")
@@ -59,6 +62,11 @@ func _ready() -> void:
 	controls_label.text = "Controls — select a binding, then press a key, mouse button, or gamepad input. Esc cancels."
 	controls_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(controls_label)
+
+	_pad_readout = Label.new()
+	_pad_readout.text = "Last gamepad input: (none yet — press any gamepad button or move a stick)"
+	_pad_readout.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(_pad_readout)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -119,6 +127,13 @@ func refresh() -> void:
 	_refresh_bindings()
 
 
+## Give the panel a focus owner so gamepad navigation works the moment
+## it opens (Close is a safe, always-present target).
+func focus_first() -> void:
+	if _close_button != null:
+		_close_button.grab_focus.call_deferred()
+
+
 func _refresh_bindings() -> void:
 	for action in _rows.keys():
 		(_rows[action] as Button).text = Game.binding_summary(action)
@@ -131,6 +146,12 @@ func _start_capture(action: String, button: Button) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if visible and _pad_readout != null:
+		if event is InputEventJoypadButton and event.pressed:
+			_pad_readout.text = "Last gamepad input: " + event.as_text()
+		elif event is InputEventJoypadMotion \
+				and absf((event as InputEventJoypadMotion).axis_value) > 0.6:
+			_pad_readout.text = "Last gamepad input: " + event.as_text()
 	if _capturing == "":
 		return
 	var captured: InputEvent = null
