@@ -5,12 +5,29 @@ A first-person voxel sandbox game built on **Godot 4.7** with **Voxel Tools**
 project and built/exported entirely by GitHub Actions. Original code, art,
 and audio throughout — no assets from any other game.
 
-**Phase 2 (v0.2.0, current): the full game shell.** A title screen with an
+**Phase 2 (v0.2.0): the full game shell.** A title screen with an
 animated block-built logo, named player profiles with unlimited worlds and
 save slots, per-user settings and fully remappable controls (keyboard,
 mouse, and gamepad), a textured world with biomes, caves, ores, and water,
 procedural sound effects and ambient music, a flashlight for the dark, and
 profile export/import for backups and syncing.
+
+**v0.2.1: title and controller fixes (from hands-on testing).**
+- New title flow: a minimal front screen (**Start** / **Settings**) opens
+  a home card with one-click **Continue** (resumes the last played
+  profile/world/slot), a Play button per world, and profile chips.
+  Rename/delete/export/import live under **Manage profiles & worlds…**.
+  The logo's letters use a saturated block palette and the title camera
+  sits closer, so the logo reads bigger and punchier against the fog.
+- Gamepad: every menu is button-driven with focus set on open, so pad
+  navigation works everywhere; a safety net re-focuses if focus is ever
+  lost. Name fields open an **on-screen keyboard** when the last input
+  device was a gamepad. Settings shows a **"Last gamepad input"**
+  readout, and saved bindings can no longer strip an action's gamepad
+  events (defaults are restored alongside partial rebinds).
+- Gamepad mining/placing is now exactly **one press = one block** (a
+  single trigger pull used to repeat ~3 times); mouse hold-to-repeat
+  continues at a slower rate.
 
 ## Profiles, worlds, and saves
 
