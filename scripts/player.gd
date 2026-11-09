@@ -23,7 +23,7 @@ const FLY_SPEED := 22.0
 const JUMP_VELOCITY := 8.6
 const GRAVITY := 28.0
 const REACH := 8.0
-const ACTION_DELAY := 0.22
+const ACTION_DELAY := 0.30
 const MAX_FALL_SPEED := 45.0
 const GROUND_WAIT_TIMEOUT := 5.0
 const STICK_LOOK_SPEED := 2.4
@@ -180,9 +180,14 @@ func _physics_process(delta: float) -> void:
 		rotate_y(-look.x * STICK_LOOK_SPEED * delta)
 		_head.rotation.x = clampf(_head.rotation.x - look.y * STICK_LOOK_SPEED * delta, -1.55, 1.55)
 
-	# Held-button mining/placing repeats at a fixed rate.
+	# Held-button mining/placing repeats at a fixed rate — mouse and
+	# keyboard only. On a gamepad, one press is exactly one block
+	# (v0.2.1 fix: a single trigger pull used to mine/place ~3 blocks,
+	# because the press event fired once and this repeat fired twice
+	# more during the same pull). Gamepad actions fire from the press
+	# event in _unhandled_input only.
 	_cooldown -= delta
-	if (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or _pad_mode) and _cooldown <= 0.0:
+	if not _pad_mode and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _cooldown <= 0.0:
 		if Input.is_action_pressed("mine"):
 			_try_action(true)
 			_cooldown = ACTION_DELAY
