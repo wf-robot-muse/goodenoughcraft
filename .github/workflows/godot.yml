@@ -109,3 +109,76 @@ jobs:
           name: goodenoughcraft-android
           path: build/android/*.apk
           if-no-files-found: error
+
+  # Windows code signing via SignPath Foundation (free open-source
+  # program). This job is DORMANT: it only runs once the project has been
+  # approved by SignPath Foundation and the following are configured in
+  # the repository settings:
+  #   - variable SIGNPATH_ENABLED = "true"
+  #   - variable SIGNPATH_ORGANIZATION_ID  (SignPath organization ID)
+  #   - variable SIGNPATH_PROJECT_SLUG     (SignPath project slug)
+  #   - variable SIGNPATH_SIGNING_POLICY_SLUG
+  #   - secret   SIGNPATH_API_TOKEN        (submitter API token)
+  # In SignPath, the project's artifact configuration must treat the
+  # uploaded artifact as a ZIP archive whose root contains
+  # GoodEnoughCraft.exe and apply an Authenticode signature to that file.
+  # Only the executable is signed; the Voxel Tools DLL ships unsigned as
+  # released upstream. See CODE_SIGNING_POLICY.md.
+  sign-windows:
+    name: Sign Windows build (SignPath)
+    if: vars.SIGNPATH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Download Godot editor and export templates
+        run: |
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          chmod +x "$GODOT_BIN"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -d "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          # The .tpz nests everything under templates/; Godot expects it flat.
+          mv "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/templates/"* "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+          "$GODOT_BIN" --version
+
+      - name: Import project (loads the Voxel Tools extension)
+        run: |
+          "$GODOT_BIN" --headless --import --path .
+
+      - name: Export Windows
+        run: |
+          mkdir -p build/windows
+          "$GODOT_BIN" --headless --export-release "Windows Desktop" build/windows/GoodEnoughCraft.exe
+
+      - name: Upload unsigned executable
+        id: upload-unsigned-exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: goodenoughcraft-windows-unsigned
+          path: build/windows/GoodEnoughCraft.exe
+          if-no-files-found: error
+
+      # The owner approves each signing request in SignPath; the wait
+      # timeout below spans the maximum GitHub-hosted job runtime, so
+      # approve promptly after triggering a release build.
+      - name: Submit signing request to SignPath
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 21600
+          output-artifact-directory: build/windows-signed
+
+      - name: Upload signed Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: goodenoughcraft-windows-signed
+          path: build/windows-signed/
+          if-no-files-found: error
