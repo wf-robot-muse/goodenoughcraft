@@ -55,6 +55,27 @@ jobs:
           sed -i "s|^export/android/android_sdk_path = .*|export/android/android_sdk_path = \"$ANDROID_HOME\"|" "$SETTINGS"
           grep "export/android" "$SETTINGS"
 
+      # Android release signing uses one fixed keystore, stored as repo
+      # secrets, so every build carries the same signature and new builds
+      # install over old ones (required on Fire OS / Android devices).
+      # Godot reads the release keystore from the export preset, so this
+      # step decodes the keystore and points the preset at it.
+      - name: Prepare Android release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set"
+            exit 1
+          fi
+          mkdir -p "$HOME/.local/share/godot/keystores"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$HOME/.local/share/godot/keystores/release.keystore"
+          sed -i "s|^keystore/release=.*|keystore/release=\"$HOME/.local/share/godot/keystores/release.keystore\"|" export_presets.cfg
+          sed -i "s|^keystore/release_user=.*|keystore/release_user=\"$ANDROID_KEY_ALIAS\"|" export_presets.cfg
+          sed -i "s|^keystore/release_password=.*|keystore/release_password=\"$ANDROID_KEY_PASSWORD\"|" export_presets.cfg
+
       - name: Import project (loads the Voxel Tools extension)
         run: |
           "$GODOT_BIN" --headless --import --path .
@@ -77,10 +98,10 @@ jobs:
           mkdir -p build/macos
           "$GODOT_BIN" --headless --export-release "macOS" build/macos/GoodEnoughCraft.zip
 
-      - name: Export Android (debug APK)
+      - name: Export Android (release APK, signed)
         run: |
           mkdir -p build/android
-          "$GODOT_BIN" --headless --export-debug "Android" build/android/GoodEnoughCraft.apk
+          "$GODOT_BIN" --headless --export-release "Android" build/android/GoodEnoughCraft.apk
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
