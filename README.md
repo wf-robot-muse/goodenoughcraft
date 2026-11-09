@@ -29,6 +29,18 @@ profile export/import for backups and syncing.
   single trigger pull used to repeat ~3 times); mouse hold-to-repeat
   continues at a slower rate.
 
+**v0.2.2: touch controls + signed Android builds (for Fire HD tablets).**
+- On tablets, a touch layer appears automatically: a left-thumb
+  virtual joystick for movement, drag on the right side of the screen
+  to look, and round **MINE / PLACE / JUMP** buttons (tap for one
+  block, hold to repeat; JUMP doubles as fly-up in fly mode, with a
+  DOWN button beside it), plus **FLY**, **LAMP**, **RUN** (sprint
+  toggle), and a **II** pause button. The hotbar is tappable for block
+  selection. Desktop and gamepad play are unchanged.
+- The Android build is now a release APK signed with one fixed
+  keystore (see Building), so updates install over the previous
+  version on the device — built for the Fire HD 10 (Fire OS 7).
+
 ## Profiles, worlds, and saves
 
 - The title screen manages **profiles**: create, rename, or delete a named
