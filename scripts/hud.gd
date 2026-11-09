@@ -3,12 +3,16 @@ extends CanvasLayer
 ## selected block highlighted, the selected block's name, and a transient
 ## message line (used for "World saved").
 
+signal slot_tapped(index: int)
+
 var _slots: Array[Panel] = []
 var _name_label: Label
 var _flash_label: Label
+var _hint_label: Label
 var _flash_time := 0.0
 
 const HINT := "Click to capture the mouse — WASD move · Space jump · Shift sprint\nLeft click mine · Right click place · 1-0 / wheel select · F fly · L flashlight · Esc pause (all controls remappable in Settings)"
+const TOUCH_HINT := "Left thumb: move stick · Right side: drag to look\nMINE / PLACE / JUMP buttons · Tap the hotbar to choose a block"
 
 
 func _ready() -> void:
@@ -18,6 +22,7 @@ func _ready() -> void:
 	hint.add_theme_color_override("font_color", Color(1, 1, 1))
 	hint.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
 	add_child(hint)
+	_hint_label = hint
 
 	_flash_label = Label.new()
 	_flash_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -87,9 +92,20 @@ func _ready() -> void:
 		number.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
 		number.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
 		panel.add_child(number)
+		# Tapping a hotbar slot selects it (tablets); desktop input is
+		# unaffected — only genuine touch presses are handled here.
+		panel.gui_input.connect(func(event: InputEvent, idx: int) -> void:
+			if event is InputEventScreenTouch and event.pressed:
+				slot_tapped.emit(idx)
+		, i)
 		bar.add_child(panel)
 		_slots.append(panel)
 	set_selected(0)
+
+
+func set_touch_hint() -> void:
+	if _hint_label != null:
+		_hint_label.text = TOUCH_HINT
 
 
 func set_selected(index: int) -> void:
