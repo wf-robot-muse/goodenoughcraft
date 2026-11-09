@@ -32,6 +32,13 @@ var terrain: VoxelLodTerrain
 var selected_index := 0
 var flying := false
 var flashlight_on := false
+# Touch controls (Fire OS / Android tablets): set by the touch layer.
+# While touch mode is on, held mine/place repeats without a captured
+# mouse, and movement can come from the virtual joystick (touch_move)
+# instead of the InputMap move actions.
+var touch_move := Vector2.ZERO
+
+var _touch_mode := false
 
 var _head: Node3D
 var _camera: Camera3D
@@ -107,6 +114,38 @@ func set_flashlight(on: bool) -> void:
 		_lamp.visible = on
 
 
+# --- Touch control hooks (called by scripts/touch_controls.gd) ---
+
+func set_touch_mode(on: bool) -> void:
+	_touch_mode = on
+	if not on:
+		touch_move = Vector2.ZERO
+
+
+func touch_look(relative: Vector2) -> void:
+	rotate_y(-relative.x * 0.0042)
+	if _head != null:
+		_head.rotation.x = clampf(_head.rotation.x - relative.y * 0.0042, -1.55, 1.55)
+
+
+func touch_action(mine: bool) -> void:
+	_try_action(mine)
+	_cooldown = ACTION_DELAY
+
+
+func toggle_fly() -> void:
+	flying = not flying
+	velocity = Vector3.ZERO
+
+
+func select_slot(index: int) -> void:
+	if index < 0 or index >= Blocks.HOTBAR.size():
+		return
+	if index != selected_index:
+		selected_index = index
+		selection_changed.emit(selected_index)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
 		_pad_mode = true
@@ -136,8 +175,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("hotbar_prev"):
 		_change_selection(-1)
 	elif event.is_action_pressed("fly_toggle"):
-		flying = not flying
-		velocity = Vector3.ZERO
+		toggle_fly()
 	elif event.is_action_pressed("flashlight"):
 		set_flashlight(not flashlight_on)
 	else:
@@ -187,7 +225,7 @@ func _physics_process(delta: float) -> void:
 	# more during the same pull). Gamepad actions fire from the press
 	# event in _unhandled_input only.
 	_cooldown -= delta
-	if not _pad_mode and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _cooldown <= 0.0:
+	if not _pad_mode and (_touch_mode or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED) and _cooldown <= 0.0:
 		if Input.is_action_pressed("mine"):
 			_try_action(true)
 			_cooldown = ACTION_DELAY
@@ -196,6 +234,8 @@ func _physics_process(delta: float) -> void:
 			_cooldown = ACTION_DELAY
 
 	var move := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	if _touch_mode and touch_move.length() > 0.05:
+		move = touch_move
 	var input_dir := Vector3(move.x, 0.0, move.y)
 
 	if flying:
