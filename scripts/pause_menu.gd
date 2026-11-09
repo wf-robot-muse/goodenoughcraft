@@ -68,6 +68,7 @@ func _show_settings() -> void:
 	_panel.visible = false
 	_settings.refresh()
 	_settings.visible = true
+	_settings.focus_first()
 
 
 func open() -> void:
