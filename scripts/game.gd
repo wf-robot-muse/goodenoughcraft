@@ -15,9 +15,10 @@ extends Node
 ## smoke test), a throwaway dev context under user://dev_world is used.
 
 const SAVE_FORMAT_VERSION := 2
-const GAME_VERSION := "0.2.0"
+const GAME_VERSION := "0.2.1"
 
 const PROFILES_PATH := "user://profiles.json"
+const LAST_PATH := "user://last.json"
 const DEV_SLOT_DIR := "user://dev_world/slot"
 
 # action name -> list of default events, each a compact spec Array:
@@ -88,6 +89,9 @@ var current_user: Dictionary = {}
 var current_world: Dictionary = {}
 var current_slot := ""
 var settings: Dictionary = {}
+## True while the most recent input device seen was a gamepad. The
+## title screen uses it to offer the on-screen keyboard for text fields.
+var pad_mode := false
 
 var _music_player: AudioStreamPlayer
 var _sfx_players: Array[AudioStreamPlayer] = []
@@ -103,6 +107,13 @@ func _ready() -> void:
 	_install_default_bindings()
 	_apply_volumes()
 	_setup_audio()
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		pad_mode = true
+	elif event is InputEventKey or event is InputEventMouseButton:
+		pad_mode = false
 
 
 func _setup_audio() -> void:
@@ -265,6 +276,51 @@ func set_context(user: Dictionary, world: Dictionary, slot: String) -> void:
 	load_settings(user["id"])
 	# A slot the player saves into must exist before the world streams.
 	ensure_slot(user["id"], world["id"], slot)
+	_save_last_context()
+
+
+func _save_last_context() -> void:
+	_save_json(LAST_PATH, {
+		"user_id": current_user.get("id", ""),
+		"world_id": current_world.get("id", ""),
+		"slot": current_slot,
+	})
+
+
+## The most recently played (user, world, slot), fully resolved and
+## validated — {} when anything it points at no longer exists.
+func last_context() -> Dictionary:
+	var data := _load_json(LAST_PATH)
+	var user := find_user(str(data.get("user_id", "")))
+	if user.is_empty():
+		return {}
+	var world := find_world(user["id"], str(data.get("world_id", "")))
+	if world.is_empty():
+		return {}
+	var slot := str(data.get("slot", ""))
+	if not list_slots(user["id"], world["id"]).has(slot):
+		return {}
+	return {"user": user, "world": world, "slot": slot}
+
+
+func find_world(user_id: String, world_id: String) -> Dictionary:
+	for world in list_worlds(user_id):
+		if world.get("id") == world_id:
+			return world
+	return {}
+
+
+## The slot a world's Play button should use: the remembered one when
+## it belongs to this world, else the first existing slot, else "".
+func preferred_slot(user: Dictionary, world: Dictionary) -> String:
+	var data := _load_json(LAST_PATH)
+	if str(data.get("user_id", "")) == str(user.get("id", "")) \
+			and str(data.get("world_id", "")) == str(world.get("id", "")):
+		var slot := str(data.get("slot", ""))
+		if list_slots(user["id"], world["id"]).has(slot):
+			return slot
+	var slots := list_slots(user["id"], world["id"])
+	return str(slots[0]) if not slots.is_empty() else ""
 
 
 func has_context() -> bool:
@@ -330,10 +386,23 @@ func _apply_settings() -> void:
 	for action in DEFAULT_BINDINGS.keys():
 		_erase_action(action)
 		var specs: Array = bindings.get(action, DEFAULT_BINDINGS[action])
+		var has_pad := false
 		for spec in specs:
 			var event := _spec_to_event(spec)
 			if event != null:
 				InputMap.action_add_event(action, event)
+			if spec is Array and not spec.is_empty() \
+					and (spec[0] == "joybtn" or spec[0] == "joyaxis"):
+				has_pad = true
+		# Repair rule: a saved binding set that lost its gamepad events
+		# (a partial rebind, an older save) must not strip gamepad
+		# control — restore the action's default gamepad events too.
+		if not has_pad:
+			for spec in DEFAULT_BINDINGS[action]:
+				if spec[0] == "joybtn" or spec[0] == "joyaxis":
+					var event := _spec_to_event(spec)
+					if event != null:
+						InputMap.action_add_event(action, event)
 
 
 func reset_bindings() -> void:
