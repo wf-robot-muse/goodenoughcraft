@@ -134,8 +134,23 @@ Notes inherited from the foundation:
 - The Android debug APK packs the addon's editor-variant voxel libraries
   (the addon ships no `template_debug` libraries); a signed release APK
   needs an upload keystore in GitHub Secrets and `--export-release`.
-- Builds are unsigned: Windows SmartScreen and macOS Gatekeeper will warn
-  on first run until code signing is set up.
+- Windows builds are currently unsigned: SmartScreen and antivirus
+  heuristics may warn on first run (Microsoft Defender's machine-learning
+  model flagged the v0.2.1 zip as `Trojan:Script/Wacatac.B!ml` — a false
+  positive; the release zip's SHA-256 in the release notes is the
+  authoritative check). Signing is **prepared** via SignPath
+  Foundation's free open-source program — see
+  [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md). It activates when the
+  project is approved and the workflow's `SIGNPATH_ENABLED` variable is
+  set; until then the `sign-windows` CI job stays dormant. macOS builds
+  are also unsigned (Gatekeeper warns on first run).
+
+## License
+
+GoodEnoughCraft is released under the [MIT License](LICENSE).
+Third-party components keep their own licenses: the Godot engine (MIT)
+and Voxel Tools (MIT), vendored in `addons/zylann.voxel/` — see the
+license files inside that folder.
 
 ## Roadmap
 
