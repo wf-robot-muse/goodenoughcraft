@@ -15,6 +15,7 @@ const TerrainGen := preload("res://scripts/terrain_generator.gd")
 const PlayerScript := preload("res://scripts/player.gd")
 const HudScript := preload("res://scripts/hud.gd")
 const PauseMenuScript := preload("res://scripts/pause_menu.gd")
+const TouchControlsScript := preload("res://scripts/touch_controls.gd")
 
 const DAY_LENGTH := 600.0 # seconds per full day/night cycle
 const AUTOSAVE_INTERVAL := 30.0
@@ -38,6 +39,7 @@ func _ready() -> void:
 	_build_player()
 	_build_hud()
 	_build_pause_menu()
+	_build_touch_controls()
 	_apply_time_of_day()
 
 
@@ -132,6 +134,13 @@ func _build_hud() -> void:
 	add_child(hud)
 	player.selection_changed.connect(hud.set_selected)
 	hud.set_selected(player.selected_index)
+	hud.slot_tapped.connect(player.select_slot)
+
+
+func _build_touch_controls() -> void:
+	var touch_controls := TouchControlsScript.new()
+	add_child(touch_controls)
+	touch_controls.setup(player, hud)
 
 
 func _build_pause_menu() -> void:
