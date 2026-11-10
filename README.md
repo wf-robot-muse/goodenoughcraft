@@ -184,9 +184,10 @@ Notes inherited from the foundation:
   enable "Apps from Unknown Sources" on the tablet and install the APK
   directly — no Google Play Services are required.
 - The Windows executable is **signed in CI with the project owner's
-  self-signed code-signing certificate** (repo secrets
-  `WINDOWS_CERT_BASE64`, `WINDOWS_CERT_PASSWORD`, applied with
-  osslsigncode plus an RFC 3161 timestamp). The build fails if the
+  self-signed code-signing certificate** (the encrypted PFX is
+  committed at `signing/wade-feltman-codesign.pfx`; only its password
+  is a repo secret, `WINDOWS_CERT_PASSWORD`; applied with osslsigncode
+  plus an RFC 3161 timestamp). The build fails if the
   signature's fingerprint does not match the fingerprint published in
   [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md), which also explains
   how to verify a download. Note the signature is tamper evidence, not
