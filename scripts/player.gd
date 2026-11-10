@@ -45,6 +45,7 @@ var _camera: Camera3D
 var _lamp: SpotLight3D
 var _tool: VoxelTool
 var _cooldown := 0.0
+var _autojump_cd := 0.0
 var _pad_mode := false
 var _step_acc := 0.0
 var _was_in_water := false
@@ -130,6 +131,18 @@ func touch_look(relative: Vector2) -> void:
 
 func touch_action(mine: bool) -> void:
 	_try_action(mine)
+	_cooldown = ACTION_DELAY
+
+
+## Mine/place at an arbitrary screen position (touch gestures, Fire
+## build issue #3): raycast from the camera through that pixel instead
+## of through the crosshair.
+func touch_action_at(mine: bool, screen_pos: Vector2) -> void:
+	if _camera == null:
+		return
+	var origin := _camera.project_ray_origin(screen_pos)
+	var direction := _camera.project_ray_normal(screen_pos)
+	_try_action_ray(mine, origin, direction)
 	_cooldown = ACTION_DELAY
 
 
@@ -259,7 +272,11 @@ func _physics_process(delta: float) -> void:
 		wish.y = 0.0
 		if wish.length() > 1.0:
 			wish = wish.normalized()
-		var speed := SPRINT_SPEED if Input.is_action_pressed("sprint") else WALK_SPEED
+		# Sprint: the sprint action, or — Minecraft-style — the touch
+		# joystick pushed fully forward to its rim (issue #3).
+		var sprinting := Input.is_action_pressed("sprint") \
+			or (_touch_mode and touch_move.y <= -0.92)
+		var speed := SPRINT_SPEED if sprinting else WALK_SPEED
 		if in_water:
 			# Swimming: slow sink, hold jump to swim up, slower movement.
 			speed *= 0.55
@@ -268,10 +285,18 @@ func _physics_process(delta: float) -> void:
 			else:
 				velocity.y = maxf(velocity.y - 12.0 * delta, -2.6)
 		else:
+			_autojump_cd = maxf(_autojump_cd - delta, 0.0)
 			if not is_on_floor():
 				velocity.y = maxf(velocity.y - GRAVITY * delta, -MAX_FALL_SPEED)
 			elif Input.is_action_pressed("jump"):
 				velocity.y = JUMP_VELOCITY
+			elif Game.auto_jump_enabled() and _autojump_cd <= 0.0 \
+					and _step_up_ahead(wish):
+				# Auto-jump (issue #8): hop one-block step-ups while
+				# walking, Minecraft-style. Grounded and dry only —
+				# never while flying or swimming.
+				velocity.y = JUMP_VELOCITY
+				_autojump_cd = 0.3
 		velocity.x = wish.x * speed
 		velocity.z = wish.z * speed
 	move_and_slide()
@@ -304,14 +329,36 @@ func _ground_below() -> bool:
 	return not space.intersect_ray(query).is_empty()
 
 
+## True when the player is walking into a step exactly one block high
+## with clear space above it — the auto-jump trigger condition.
+func _step_up_ahead(wish: Vector3) -> bool:
+	var dir := Vector3(wish.x, 0.0, wish.z)
+	if dir.length() < 0.2:
+		return false
+	dir = dir.normalized()
+	var feet := floori(global_position.y + 0.05)
+	var probe := global_position + dir * 0.8
+	var step_block := _voxel_at(Vector3(probe.x, feet + 0.5, probe.z))
+	if step_block == Blocks.AIR or step_block == Blocks.WATER:
+		return false
+	return _voxel_at(Vector3(probe.x, feet + 1.5, probe.z)) == Blocks.AIR \
+		and _voxel_at(Vector3(probe.x, feet + 2.5, probe.z)) == Blocks.AIR
+
+
 func _try_action(mine: bool) -> void:
 	if terrain == null or _camera == null:
+		return
+	var origin := _camera.global_position
+	var direction := -_camera.global_transform.basis.z
+	_try_action_ray(mine, origin, direction)
+
+
+func _try_action_ray(mine: bool, origin: Vector3, direction: Vector3) -> void:
+	if terrain == null:
 		return
 	if _tool == null:
 		_tool = terrain.get_voxel_tool()
 		_tool.channel = VoxelBuffer.CHANNEL_TYPE
-	var origin := _camera.global_position
-	var direction := -_camera.global_transform.basis.z
 	var hit := _tool.raycast(origin, direction, REACH)
 	if hit == null:
 		return
