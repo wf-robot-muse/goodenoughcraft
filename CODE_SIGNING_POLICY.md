@@ -19,9 +19,12 @@ the project's own key — tamper evidence for every release.
 
 The public certificate is in this repository at
 [`signing/wade-feltman-codesigning.cer`](signing/wade-feltman-codesigning.cer).
-The private key is held only by the project owner and by this
-repository's GitHub Actions secrets (`WINDOWS_CERT_BASE64`,
-`WINDOWS_CERT_PASSWORD`); it is never committed to the repository.
+The private key is committed to this repository only in encrypted
+form, as the PKCS#12 file
+[`signing/wade-feltman-codesign.pfx`](signing/wade-feltman-codesign.pfx);
+the password that decrypts it exists only in the project owner's
+records and in this repository's `WINDOWS_CERT_PASSWORD` GitHub
+Actions secret. The unencrypted private key is never committed.
 
 ## What this signature does — and does not — guarantee
 
@@ -68,10 +71,11 @@ certificate until a publicly trusted route is adopted.
 
 1. Every release build runs on GitHub-hosted runners from this public
    repository — never on a private machine.
-2. The CI workflow decodes the certificate from the repository secret,
-   signs `GoodEnoughCraft.exe` with osslsigncode, and applies an
-   RFC 3161 timestamp (DigiCert TSA) so signatures remain verifiable
-   after the certificate expires.
+2. The CI workflow signs `GoodEnoughCraft.exe` with osslsigncode,
+   using the encrypted PFX committed in `signing/` and its password
+   from the repository secret, and applies an RFC 3161 timestamp
+   (DigiCert TSA) so signatures remain verifiable after the
+   certificate expires.
 3. The workflow then extracts the signature from the signed file and
    **fails the build** if the signer's SHA-256 fingerprint does not
    match the fingerprint published above.
