@@ -16,6 +16,10 @@ var _sfx_slider: HSlider
 var _sync_edit: LineEdit
 var _close_button: Button
 var _pad_readout: Label
+var _percent_sliders: Dictionary = {} # setting key -> HSlider
+var _percent_labels: Dictionary = {} # setting key -> value Label
+var _left_handed_check: CheckBox
+var _auto_jump_check: CheckBox
 
 
 func _ready() -> void:
@@ -41,6 +45,13 @@ func _ready() -> void:
 
 	_music_slider = _add_volume_row(vbox, "Music volume", "music_volume")
 	_sfx_slider = _add_volume_row(vbox, "Sound effects volume", "sfx_volume")
+	_add_percent_row(vbox, "Menu text size", "menu_text_scale", 80, 150)
+	_add_percent_row(vbox, "Hotbar size", "hotbar_scale", 80, 160)
+	_add_percent_row(vbox, "Hotbar text size", "hotbar_text_scale", 80, 160)
+	_left_handed_check = _add_toggle_row(vbox,
+		"Left-handed touch controls (mirror the touch layout)", "left_handed")
+	_auto_jump_check = _add_toggle_row(vbox,
+		"Auto-jump (step up one block automatically)", "auto_jump")
 
 	var sync_row := HBoxContainer.new()
 	var sync_label := Label.new()
@@ -70,7 +81,7 @@ func _ready() -> void:
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(0, 260)
+	scroll.custom_minimum_size = Vector2(0, 190)
 	vbox.add_child(scroll)
 	var grid := GridContainer.new()
 	grid.columns = 2
@@ -120,9 +131,50 @@ func _add_volume_row(parent: VBoxContainer, text: String, kind: String) -> HSlid
 	return slider
 
 
+func _add_percent_row(parent: VBoxContainer, text: String, key: String,
+		min_pct: int, max_pct: int) -> void:
+	var row := HBoxContainer.new()
+	var label := Label.new()
+	label.text = text
+	label.custom_minimum_size = Vector2(190, 0)
+	row.add_child(label)
+	var slider := HSlider.new()
+	slider.min_value = min_pct
+	slider.max_value = max_pct
+	slider.step = 5
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.value_changed.connect(func(value: float) -> void:
+		(_percent_labels[key] as Label).text = str(int(value)) + "%"
+		Game.set_setting(key, value / 100.0, false))
+	slider.drag_ended.connect(func(_changed: bool) -> void:
+		Game.save_settings())
+	row.add_child(slider)
+	var value_label := Label.new()
+	value_label.custom_minimum_size = Vector2(48, 0)
+	row.add_child(value_label)
+	parent.add_child(row)
+	_percent_sliders[key] = slider
+	_percent_labels[key] = value_label
+
+
+func _add_toggle_row(parent: VBoxContainer, text: String, key: String) -> CheckBox:
+	var check := CheckBox.new()
+	check.text = text
+	check.toggled.connect(func(on: bool) -> void:
+		Game.set_setting(key, on))
+	parent.add_child(check)
+	return check
+
+
 func refresh() -> void:
 	_music_slider.value = float(Game.settings.get("music_volume", 0.7)) * 100.0
 	_sfx_slider.value = float(Game.settings.get("sfx_volume", 0.9)) * 100.0
+	for key in _percent_sliders.keys():
+		var pct: int = int(round(float(Game.settings.get(key, 1.0)) * 100.0))
+		(_percent_sliders[key] as HSlider).set_value_no_signal(pct)
+		(_percent_labels[key] as Label).text = str(pct) + "%"
+	_left_handed_check.set_pressed_no_signal(Game.left_handed())
+	_auto_jump_check.set_pressed_no_signal(Game.auto_jump_enabled())
 	_sync_edit.text = str(Game.settings.get("sync_folder", ""))
 	_refresh_bindings()
 
