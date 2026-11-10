@@ -6,13 +6,19 @@ extends CanvasLayer
 signal slot_tapped(index: int)
 
 var _slots: Array[Panel] = []
+var _fills: Array[ColorRect] = []
+var _number_labels: Array[Label] = []
+var _bar: HBoxContainer
+var _crosshair: Label
+var _slot_size := 52.0
 var _name_label: Label
 var _flash_label: Label
 var _hint_label: Label
 var _flash_time := 0.0
 
 const HINT := "Click to capture the mouse — WASD move · Space jump · Shift sprint\nLeft click mine · Right click place · 1-0 / wheel select · F fly · L flashlight · Esc pause (all controls remappable in Settings)"
-const TOUCH_HINT := "Left thumb: move stick · Right side: drag to look\nMINE / PLACE / JUMP buttons · Tap the hotbar to choose a block"
+const TOUCH_HINT_R := "Left thumb: move stick · Right side: drag to look · Tap: place · Hold: mine\nPush the stick fully forward to sprint · Tap the hotbar to choose a block"
+const TOUCH_HINT_L := "Right thumb: move stick · Left side: drag to look · Tap: place · Hold: mine\nPush the stick fully forward to sprint · Tap the hotbar to choose a block"
 
 
 func _ready() -> void:
@@ -36,19 +42,14 @@ func _ready() -> void:
 	_flash_label.modulate.a = 0.0
 	add_child(_flash_label)
 
-	var crosshair := Label.new()
-	crosshair.text = "+"
-	crosshair.set_anchors_preset(Control.PRESET_CENTER)
-	crosshair.offset_left = -12
-	crosshair.offset_right = 12
-	crosshair.offset_top = -16
-	crosshair.offset_bottom = 16
-	crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	crosshair.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	crosshair.add_theme_font_size_override("font_size", 24)
-	crosshair.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
-	crosshair.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
-	add_child(crosshair)
+	_crosshair = Label.new()
+	_crosshair.text = "+"
+	_crosshair.set_anchors_preset(Control.PRESET_CENTER)
+	_crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_crosshair.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_crosshair.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	_crosshair.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	add_child(_crosshair)
 
 	_name_label = Label.new()
 	_name_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
@@ -62,15 +63,11 @@ func _ready() -> void:
 	_name_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
 	add_child(_name_label)
 
-	var bar := HBoxContainer.new()
-	bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	bar.offset_left = -285
-	bar.offset_right = 285
-	bar.offset_top = -72
-	bar.offset_bottom = -16
-	bar.alignment = BoxContainer.ALIGNMENT_CENTER
-	bar.add_theme_constant_override("separation", 4)
-	add_child(bar)
+	_bar = HBoxContainer.new()
+	_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	add_child(_bar)
+	var bar := _bar
 
 	for i in Blocks.HOTBAR.size():
 		var id := Blocks.HOTBAR[i]
@@ -85,6 +82,7 @@ func _ready() -> void:
 		fill.offset_bottom = -6
 		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		panel.add_child(fill)
+		_fills.append(fill)
 		var number := Label.new()
 		number.text = str(i + 1)
 		number.position = Vector2(4, 0)
@@ -92,33 +90,97 @@ func _ready() -> void:
 		number.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
 		number.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
 		panel.add_child(number)
+		_number_labels.append(number)
 		# Tapping a hotbar slot selects it (tablets); desktop input is
 		# unaffected — only genuine touch presses are handled here.
-		panel.gui_input.connect(func(event: InputEvent, idx: int) -> void:
-			if event is InputEventScreenTouch and event.pressed:
-				slot_tapped.emit(idx)
-		, i)
+		# The index is bound with .bind(): passing it as connect()'s
+		# second argument set the connection FLAGS instead and the
+		# handler never ran (Fire build issue #2).
+		panel.gui_input.connect(_on_slot_gui_input.bind(i))
 		bar.add_child(panel)
 		_slots.append(panel)
 	set_selected(0)
+	Game.settings_changed.connect(apply_ui_scale)
+	apply_ui_scale()
+
+
+func _on_slot_gui_input(event: InputEvent, index: int) -> void:
+	if event is InputEventScreenTouch and event.pressed:
+		slot_tapped.emit(index)
+
+
+## Distance from the bottom of the screen the touch zones must keep
+## clear: hotbar (scaled) plus the selected-block name above it.
+func bottom_clearance() -> float:
+	return 16.0 + _slot_size + 64.0
+
+
+## Re-derive every scale-dependent size from the Game settings:
+## menu text factor for the readouts, hotbar factor for the slots,
+## and a bigger, outlined crosshair (Fire build issues #4, #5, #7).
+func apply_ui_scale() -> void:
+	var base := Game.ui_base_factor()
+	var menu_f := Game.ui_factor()
+	_hint_label.add_theme_font_size_override("font_size", int(round(16.0 * menu_f)))
+	# In the left-handed layout the pause button sits at the top left,
+	# where the hint lives — shift the hint right to clear it.
+	_hint_label.position.x = 88.0 if Game.left_handed() else 16.0
+	_flash_label.add_theme_font_size_override("font_size", int(round(16.0 * menu_f)))
+
+	var cross := 34.0 * base
+	_crosshair.add_theme_font_size_override("font_size", int(round(cross)))
+	_crosshair.add_theme_constant_override("outline_size", int(round(8.0 * base)))
+	var ch := cross * 0.8
+	_crosshair.offset_left = -ch
+	_crosshair.offset_right = ch
+	_crosshair.offset_top = -ch
+	_crosshair.offset_bottom = ch
+
+	var hf := Game.hotbar_factor()
+	_slot_size = round(52.0 * hf)
+	var sep := maxf(2.0, round(4.0 * hf))
+	_bar.add_theme_constant_override("separation", int(sep))
+	var width := 10.0 * _slot_size + 9.0 * sep
+	_bar.offset_left = -width / 2.0
+	_bar.offset_right = width / 2.0
+	_bar.offset_bottom = -16.0
+	_bar.offset_top = -(16.0 + _slot_size + 8.0)
+	var inset := maxf(2.0, round(6.0 * hf))
+	var number_size := int(round(11.0 * Game.hotbar_text_factor()))
+	for i in _slots.size():
+		_slots[i].custom_minimum_size = Vector2(_slot_size, _slot_size)
+		_fills[i].offset_left = inset
+		_fills[i].offset_top = inset
+		_fills[i].offset_right = -inset
+		_fills[i].offset_bottom = -inset
+		_number_labels[i].add_theme_font_size_override("font_size", number_size)
+		_number_labels[i].position = Vector2(4.0 * hf, 0)
+
+	var text_f: float = float(Game.settings.get("hotbar_text_scale", 1.0))
+	_name_label.add_theme_font_size_override("font_size", int(round(18.0 * base * text_f)))
+	var name_h: float = round(26.0 * base * text_f)
+	_name_label.offset_top = _bar.offset_top - name_h - 4.0
+	_name_label.offset_bottom = _bar.offset_top - 4.0
 
 
 func set_touch_hint() -> void:
 	if _hint_label != null:
-		_hint_label.text = TOUCH_HINT
+		_hint_label.text = TOUCH_HINT_L if Game.left_handed() else TOUCH_HINT_R
 
 
 func set_selected(index: int) -> void:
+	var hf := Game.hotbar_factor()
+	var radius := int(round(4.0 * hf))
 	for i in _slots.size():
 		var style := StyleBoxFlat.new()
 		style.bg_color = Color(0, 0, 0, 0.45)
-		style.corner_radius_top_left = 4
-		style.corner_radius_top_right = 4
-		style.corner_radius_bottom_left = 4
-		style.corner_radius_bottom_right = 4
+		style.corner_radius_top_left = radius
+		style.corner_radius_top_right = radius
+		style.corner_radius_bottom_left = radius
+		style.corner_radius_bottom_right = radius
 		if i == index:
 			style.border_color = Color(1, 1, 1, 1)
-			style.set_border_width_all(3)
+			style.set_border_width_all(maxi(2, int(round(3.0 * hf))))
 		else:
 			style.border_color = Color(1, 1, 1, 0.35)
 			style.set_border_width_all(1)
