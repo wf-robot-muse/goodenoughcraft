@@ -15,7 +15,9 @@ extends Node
 ## smoke test), a throwaway dev context under user://dev_world is used.
 
 const SAVE_FORMAT_VERSION := 2
-const GAME_VERSION := "0.2.2"
+const GAME_VERSION := "0.2.3"
+
+signal settings_changed
 
 const PROFILES_PATH := "user://profiles.json"
 const LAST_PATH := "user://last.json"
@@ -363,6 +365,10 @@ func default_settings() -> Dictionary:
 		"sfx_volume": 0.9,
 		"sync_folder": "",
 		"bindings": {},
+		"menu_text_scale": 1.0,
+		"hotbar_scale": 1.0,
+		"hotbar_text_scale": 1.0,
+		"left_handed": false,
 	}
 
 
@@ -372,6 +378,56 @@ func load_settings(user_id: String) -> void:
 	for key in loaded.keys():
 		settings[key] = loaded[key]
 	_apply_settings()
+	settings_changed.emit()
+
+
+## Set one setting, persist it, and notify listeners (menus, HUD, touch
+## layer) so changes apply live. Pass save=false during slider drags and
+## call save_settings() when the drag ends.
+func set_setting(key: String, value: Variant, save := true) -> void:
+	settings[key] = value
+	if save:
+		save_settings()
+	settings_changed.emit()
+
+
+## UI scale derived from the physical display: high-DPI screens (the
+## Fire HD 10 is ~224 DPI) get proportionally larger menus and HUD, so
+## text lands at a readable physical size on any screen. Ordinary
+## desktop displays sit at the 1.0 floor and are unchanged.
+func ui_base_factor() -> float:
+	var dpi := DisplayServer.screen_get_dpi()
+	if dpi <= 0:
+		return 1.0
+	return clampf(float(dpi) / 120.0, 1.0, 1.8)
+
+
+## Full menu scale: display factor times the user's menu-text setting.
+func ui_factor() -> float:
+	return ui_base_factor() * float(settings.get("menu_text_scale", 1.0))
+
+
+## Hotbar slot scale: display factor times the user's hotbar setting.
+func hotbar_factor() -> float:
+	return ui_base_factor() * float(settings.get("hotbar_scale", 1.0))
+
+
+## Hotbar text scale: the slot scale times the user's hotbar-text
+## setting, so item text grows with its bar plus its own adjustment.
+func hotbar_text_factor() -> float:
+	return hotbar_factor() * float(settings.get("hotbar_text_scale", 1.0))
+
+
+func left_handed() -> bool:
+	return bool(settings.get("left_handed", false))
+
+
+## Auto-jump defaults ON for touch devices (Minecraft's platform
+## default) until the user sets it explicitly.
+func auto_jump_enabled() -> bool:
+	if settings.has("auto_jump"):
+		return bool(settings["auto_jump"])
+	return DisplayServer.is_touchscreen_available()
 
 
 func save_settings() -> void:
