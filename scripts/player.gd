@@ -23,7 +23,8 @@ const FLY_SPEED := 22.0
 const JUMP_VELOCITY := 8.6
 const GRAVITY := 28.0
 const REACH := 8.0
-const ACTION_DELAY := 0.30
+const ACTION_DELAY := 0.30 # held placement repeat rate
+const NEXT_BLOCK_DELAY := 0.25 # Minecraft's delay before the next held break
 const MAX_FALL_SPEED := 45.0
 const GROUND_WAIT_TIMEOUT := 5.0
 const STICK_LOOK_SPEED := 2.4
@@ -44,6 +45,16 @@ var _head: Node3D
 var _camera: Camera3D
 var _lamp: SpotLight3D
 var _tool: VoxelTool
+var _crack: MeshInstance3D
+var _crack_material: StandardMaterial3D
+var _crack_textures: Array[Texture2D] = []
+var _crack_stage := -1
+var _touch_mining := false
+var _touch_mine_pos := Vector2.ZERO
+var _mine_cell := Vector3i.ZERO
+var _mine_cell_valid := false
+var _mine_progress := 0.0
+var _mine_delay := 0.0
 var _cooldown := 0.0
 var _autojump_cd := 0.0
 var _pad_mode := false
@@ -88,6 +99,8 @@ func _ready() -> void:
 	viewer.view_distance = 96
 	add_child(viewer)
 
+	_build_crack_overlay()
+
 
 func selected_block() -> int:
 	return Blocks.HOTBAR[selected_index]
@@ -121,6 +134,7 @@ func set_touch_mode(on: bool) -> void:
 	_touch_mode = on
 	if not on:
 		touch_move = Vector2.ZERO
+		touch_mine_end()
 
 
 func touch_look(relative: Vector2) -> void:
@@ -130,20 +144,44 @@ func touch_look(relative: Vector2) -> void:
 
 
 func touch_action(mine: bool) -> void:
-	_try_action(mine)
-	_cooldown = ACTION_DELAY
+	# Mining is timed now (issue #10), so this legacy one-shot hook only
+	# places. Timed touch mining uses touch_mine_begin/update/end.
+	if not mine:
+		_try_action(false)
+		_cooldown = ACTION_DELAY
 
 
-## Mine/place at an arbitrary screen position (touch gestures, Fire
-## build issue #3): raycast from the camera through that pixel instead
-## of through the crosshair.
+## Place at an arbitrary screen position (touch tap, Fire build issue
+## #3), or begin timed mining at that position when mine is true.
 func touch_action_at(mine: bool, screen_pos: Vector2) -> void:
+	if mine:
+		touch_mine_begin(screen_pos)
+		return
 	if _camera == null:
 		return
 	var origin := _camera.project_ray_origin(screen_pos)
 	var direction := _camera.project_ray_normal(screen_pos)
-	_try_action_ray(mine, origin, direction)
+	_try_action_ray(false, origin, direction)
 	_cooldown = ACTION_DELAY
+
+
+## Begin Minecraft-style timed mining at a touch point. The player
+## resolves the block under that screen position every physics tick;
+## sliding the finger therefore retargets (and resets) the break, just
+## as releasing the hold does.
+func touch_mine_begin(screen_pos: Vector2) -> void:
+	_touch_mining = true
+	_touch_mine_pos = screen_pos
+	_reset_mining()
+
+
+func touch_mine_update(screen_pos: Vector2) -> void:
+	_touch_mine_pos = screen_pos
+
+
+func touch_mine_end() -> void:
+	_touch_mining = false
+	_reset_mining()
 
 
 func toggle_fly() -> void:
@@ -178,8 +216,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event.is_action_pressed("mine"):
-		_try_action(true)
-		_cooldown = ACTION_DELAY
+		# No instant break on the press (issue #10): _update_mining
+		# accumulates crack progress for as long as the input is held.
+		pass
 	elif event.is_action_pressed("place"):
 		_try_action(false)
 		_cooldown = ACTION_DELAY
@@ -231,20 +270,16 @@ func _physics_process(delta: float) -> void:
 		rotate_y(-look.x * STICK_LOOK_SPEED * delta)
 		_head.rotation.x = clampf(_head.rotation.x - look.y * STICK_LOOK_SPEED * delta, -1.55, 1.55)
 
-	# Held-button mining/placing repeats at a fixed rate — mouse and
-	# keyboard only. On a gamepad, one press is exactly one block
-	# (v0.2.1 fix: a single trigger pull used to mine/place ~3 blocks,
-	# because the press event fired once and this repeat fired twice
-	# more during the same pull). Gamepad actions fire from the press
-	# event in _unhandled_input only.
+	# Held placement repeats at a fixed rate — mouse and keyboard
+	# only. On a gamepad, placement remains one block per press (the
+	# v0.2.1 fix). Mining is separate: _update_mining applies timed,
+	# per-block breaking for mouse, gamepad, and touch holds alike.
 	_cooldown -= delta
 	if not _pad_mode and (_touch_mode or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED) and _cooldown <= 0.0:
-		if Input.is_action_pressed("mine"):
-			_try_action(true)
-			_cooldown = ACTION_DELAY
-		elif Input.is_action_pressed("place"):
+		if Input.is_action_pressed("place"):
 			_try_action(false)
 			_cooldown = ACTION_DELAY
+	_update_mining(delta)
 
 	var move := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	if _touch_mode and touch_move.length() > 0.05:
@@ -343,6 +378,141 @@ func _step_up_ahead(wish: Vector3) -> bool:
 		return false
 	return _voxel_at(Vector3(probe.x, feet + 1.5, probe.z)) == Blocks.AIR \
 		and _voxel_at(Vector3(probe.x, feet + 2.5, probe.z)) == Blocks.AIR
+
+
+## Minecraft-style timed breaking (Fire build issue #10): while a mine
+## input is held, crack progress accumulates against the targeted
+## block at that block's bare-hand rate (Blocks.break_seconds). The
+## block breaks only when progress reaches its full time. Releasing
+## the input, losing the target, or moving to another block resets
+## progress. After a break, Minecraft's short delay applies before the
+## next block starts cracking.
+func _update_mining(delta: float) -> void:
+	if terrain == null or _camera == null:
+		_reset_mining()
+		return
+	var origin := Vector3.ZERO
+	var direction := Vector3.ZERO
+	var held := false
+	if _touch_mining:
+		origin = _camera.project_ray_origin(_touch_mine_pos)
+		direction = _camera.project_ray_normal(_touch_mine_pos)
+		held = true
+	elif Input.is_action_pressed("mine") and (_pad_mode or _touch_mode \
+			or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED):
+		origin = _camera.global_position
+		direction = -_camera.global_transform.basis.z
+		held = true
+	if not held:
+		_reset_mining()
+		return
+
+	if _tool == null:
+		_tool = terrain.get_voxel_tool()
+		_tool.channel = VoxelBuffer.CHANNEL_TYPE
+	var hit := _tool.raycast(origin, direction, REACH)
+	if hit == null:
+		_reset_mining()
+		return
+	var block_id: int = _tool.get_voxel(hit.position)
+	if block_id == Blocks.AIR or block_id == Blocks.WATER:
+		_reset_mining()
+		return
+
+	if not _mine_cell_valid or hit.position != _mine_cell:
+		_mine_cell = hit.position
+		_mine_cell_valid = true
+		_mine_progress = 0.0
+
+	if _mine_delay > 0.0:
+		_mine_delay -= delta
+		_hide_crack()
+		return
+
+	_mine_progress += delta
+	var needed := Blocks.break_seconds(block_id)
+	if _mine_progress >= needed:
+		_tool.set_voxel(hit.position, Blocks.AIR)
+		Game.play_sfx("break", randf_range(0.92, 1.08))
+		_mine_progress = 0.0
+		_mine_delay = NEXT_BLOCK_DELAY
+		_mine_cell_valid = false
+		_hide_crack()
+		return
+	_show_crack(hit.position, int(_mine_progress / needed * 10.0))
+
+
+func _reset_mining() -> void:
+	_mine_progress = 0.0
+	_mine_delay = 0.0
+	_mine_cell_valid = false
+	_hide_crack()
+
+
+func _build_crack_overlay() -> void:
+	_crack_textures = _make_crack_textures()
+	_crack_material = StandardMaterial3D.new()
+	_crack_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_crack_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_crack_material.albedo_texture = _crack_textures[0]
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(1.01, 1.01, 1.01)
+	mesh.material = _crack_material
+	_crack = MeshInstance3D.new()
+	_crack.mesh = mesh
+	_crack.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_crack.top_level = true
+	_crack.visible = false
+	add_child(_crack)
+
+
+## Ten cumulative crack stages, generated procedurally like the game's
+## other textures: branching dark walks spread from the center, in the
+## spirit of Minecraft's destroy-stage overlay.
+func _make_crack_textures() -> Array[Texture2D]:
+	var textures: Array[Texture2D] = []
+	var image := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261110
+	var walkers: Array = []
+	for stage in range(10):
+		for i in range(3):
+			walkers.append([Vector2(32, 32), Vector2.RIGHT.rotated(rng.randf() * TAU)])
+		for walker in walkers:
+			var pos: Vector2 = walker[0]
+			var dir: Vector2 = walker[1]
+			for step in range(4):
+				dir = dir.rotated(rng.randf_range(-0.7, 0.7))
+				pos += dir * 2.0
+				for dx in range(2):
+					for dy in range(2):
+						var px := int(pos.x) + dx
+						var py := int(pos.y) + dy
+						if px >= 0 and px < 64 and py >= 0 and py < 64:
+							image.set_pixel(px, py, Color(0, 0, 0, 0.6))
+			walker[0] = pos
+			walker[1] = dir
+		var snapshot := image.duplicate() as Image
+		textures.append(ImageTexture.create_from_image(snapshot))
+	return textures
+
+
+func _show_crack(cell: Vector3i, stage: int) -> void:
+	if _crack == null or _crack_material == null:
+		return
+	var clamped_stage := clampi(stage, 0, 9)
+	if clamped_stage != _crack_stage:
+		_crack_stage = clamped_stage
+		_crack_material.albedo_texture = _crack_textures[clamped_stage]
+	_crack.global_position = Vector3(cell) + Vector3(0.5, 0.5, 0.5)
+	_crack.visible = true
+
+
+func _hide_crack() -> void:
+	if _crack != null:
+		_crack.visible = false
+	_crack_stage = -1
 
 
 func _try_action(mine: bool) -> void:
