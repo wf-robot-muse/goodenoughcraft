@@ -20,9 +20,22 @@ var _percent_sliders: Dictionary = {} # setting key -> HSlider
 var _percent_labels: Dictionary = {} # setting key -> value Label
 var _left_handed_check: CheckBox
 var _auto_jump_check: CheckBox
+var _day_night_check: CheckBox
 
 
 func _ready() -> void:
+	# Fire build issue #9: do not rely on the default theme's panel;
+	# every Settings surface uses this explicit, fully opaque backing.
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.09, 0.11, 1.0)
+	panel_style.border_color = Color(0.65, 0.68, 0.72, 1.0)
+	panel_style.set_border_width_all(2)
+	panel_style.set_corner_radius_all(6)
+	panel_style.content_margin_left = 16.0
+	panel_style.content_margin_top = 14.0
+	panel_style.content_margin_right = 16.0
+	panel_style.content_margin_bottom = 14.0
+	add_theme_stylebox_override("panel", panel_style)
 	custom_minimum_size = Vector2(600, 520)
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 8)
@@ -52,6 +65,8 @@ func _ready() -> void:
 		"Left-handed touch controls (mirror the touch layout)", "left_handed")
 	_auto_jump_check = _add_toggle_row(vbox,
 		"Auto-jump (step up one block automatically)", "auto_jump")
+	_day_night_check = _add_toggle_row(vbox,
+		"Day/night cycle (off = always day)", "day_night_cycle")
 
 	var sync_row := HBoxContainer.new()
 	var sync_label := Label.new()
@@ -175,6 +190,7 @@ func refresh() -> void:
 		(_percent_labels[key] as Label).text = str(pct) + "%"
 	_left_handed_check.set_pressed_no_signal(Game.left_handed())
 	_auto_jump_check.set_pressed_no_signal(Game.auto_jump_enabled())
+	_day_night_check.set_pressed_no_signal(Game.day_night_cycle_enabled())
 	_sync_edit.text = str(Game.settings.get("sync_folder", ""))
 	_refresh_bindings()
 
