@@ -1,14 +1,19 @@
 extends CanvasLayer
 ## Touch controls for tablets (Fire OS / Android), built in code like
-## the HUD. Layout follows the usual mobile-sandbox pattern:
+## the HUD. The layout mirrors Minecraft Bedrock's "Joystick & tap to
+## interact" mode (Fire build issue #3):
 ##
-## - Left thumb: a virtual joystick that appears where the thumb lands
-##   (left 42% of the screen) and steers with full analog strength.
-## - Right side: drag anywhere to look around.
-## - Buttons (bottom right): MINE and PLACE (tap = one block, hold =
-##   repeat), JUMP (doubles as fly-up while flying; a DOWN button
-##   appears next to it in fly mode), and a small row with FLY, LAMP
-##   (flashlight) and RUN (sprint toggle). II at the top right pauses.
+## - One thumb: a virtual joystick that appears where the thumb lands
+##   and steers with full analog strength. Pushing it fully forward to
+##   its rim sprints.
+## - The other side: gestures — drag to look, tap to place a block at
+##   the tap point, hold to mine the block under the finger (the mining
+##   target follows the finger while held).
+## - Buttons on the look side: JUMP (doubles as fly-up while flying; a
+##   DOWN button appears next to it in fly mode), FLY and LAMP
+##   (flashlight) above it, and II at the top corner to pause.
+## - A Settings toggle (issue #6) mirrors the whole layout for
+##   left-handed players.
 ## - The hotbar stays tappable for block selection (see hud.gd).
 ##
 ## The layer activates automatically on Android; on any other platform
@@ -16,19 +21,33 @@ extends CanvasLayer
 ## mouse, or gamepad is completely unaffected.
 
 const JOY_RADIUS := 62.0
+const TAP_MAX_MS := 300
+const TAP_MAX_MOVE := 18.0
+const HOLD_MS := 320
+const MINE_INTERVAL := 0.30
 
 var _player = null
 var _hud = null
 var _active := false
 var _was_paused := false
+var _left_handed := false
 
 var _joy_base: Panel
 var _joy_knob: Panel
 var _joy_id := -1
 var _joy_origin := Vector2.ZERO
+var _look_zone: Control
 
 var _down_btn: Button
-var _jump_fly := false
+
+# Gesture state for the look zone.
+var _look_id := -1
+var _press_pos := Vector2.ZERO
+var _press_msec := 0
+var _press_dragging := false
+var _mining := false
+var _mine_pos := Vector2.ZERO
+var _mine_timer := 0.0
 
 
 func _ready() -> void:
@@ -37,15 +56,31 @@ func _ready() -> void:
 	# hide itself under the pause menu and release held actions.
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
-	_build_zones()
-	_build_buttons()
+	_left_handed = Game.left_handed()
+	Game.settings_changed.connect(_on_settings_changed)
+	_build_all()
 
 
 func setup(player, hud) -> void:
 	_player = player
 	_hud = hud
+	# Rebuild now that the HUD is known (its scaled height sets how
+	# much of the bottom the zones must keep clear).
+	_build_all()
 	if OS.has_feature("android"):
 		_activate()
+
+
+func _on_settings_changed() -> void:
+	# Settings only change from the title or pause menus, never
+	# mid-gesture; rebuilding there keeps handedness and the hotbar
+	# clearance live.
+	if _active and not get_tree().paused:
+		return
+	_left_handed = Game.left_handed()
+	_build_all()
+	if _active and _hud != null and _hud.has_method("set_touch_hint"):
+		_hud.set_touch_hint()
 
 
 func _activate() -> void:
@@ -64,7 +99,7 @@ func _input(event: InputEvent) -> void:
 		_activate()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not _active:
 		return
 	var paused_now := get_tree().paused
@@ -74,6 +109,22 @@ func _process(_delta: float) -> void:
 	visible = not paused_now
 	if _down_btn != null:
 		_down_btn.visible = _player != null and _player.flying
+	if paused_now:
+		return
+	# Hold-to-mine: a press that stays put past the threshold becomes
+	# mining; a drag that starts moving first becomes look instead.
+	if _look_id != -1 and not _mining and not _press_dragging \
+			and Time.get_ticks_msec() - _press_msec >= HOLD_MS:
+		_mining = true
+		_mine_pos = _to_viewport(_press_pos)
+		_mine_timer = MINE_INTERVAL
+		if _player != null:
+			_player.touch_action_at(true, _mine_pos)
+	if _mining and _player != null:
+		_mine_timer -= delta
+		if _mine_timer <= 0.0:
+			_player.touch_action_at(true, _mine_pos)
+			_mine_timer = MINE_INTERVAL
 
 
 func _release_all() -> void:
@@ -82,6 +133,9 @@ func _release_all() -> void:
 	if _player != null:
 		_player.touch_move = Vector2.ZERO
 	_joy_id = -1
+	_look_id = -1
+	_mining = false
+	_press_dragging = false
 	if _joy_base != null:
 		_joy_base.visible = false
 	if _joy_knob != null:
@@ -89,6 +143,14 @@ func _release_all() -> void:
 
 
 # --- Construction ---
+
+func _build_all() -> void:
+	for child in get_children():
+		child.queue_free()
+	_down_btn = null
+	_build_zones()
+	_build_buttons()
+
 
 func _circle_style(bg: Color, border: Color) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
@@ -100,11 +162,20 @@ func _circle_style(bg: Color, border: Color) -> StyleBoxFlat:
 
 
 func _build_zones() -> void:
+	var clearance := 128.0
+	if _hud != null and _hud.has_method("bottom_clearance"):
+		clearance = _hud.bottom_clearance()
+
 	var move_zone := Control.new()
+	if _left_handed:
+		move_zone.anchor_left = 0.58
+		move_zone.anchor_right = 1.0
+	else:
+		move_zone.anchor_left = 0.0
+		move_zone.anchor_right = 0.42
 	move_zone.anchor_top = 0.30
-	move_zone.anchor_right = 0.42
 	move_zone.anchor_bottom = 1.0
-	move_zone.offset_bottom = -128 # keep the hotbar strip tappable
+	move_zone.offset_bottom = -clearance # keep the hotbar strip tappable
 	move_zone.mouse_filter = Control.MOUSE_FILTER_STOP
 	move_zone.gui_input.connect(_on_move_zone_input)
 	add_child(move_zone)
@@ -128,13 +199,26 @@ func _build_zones() -> void:
 	move_zone.add_child(_joy_knob)
 
 	var look_zone := Control.new()
-	look_zone.anchor_left = 0.42
-	look_zone.anchor_right = 1.0
+	if _left_handed:
+		look_zone.anchor_left = 0.0
+		look_zone.anchor_right = 0.58
+	else:
+		look_zone.anchor_left = 0.42
+		look_zone.anchor_right = 1.0
 	look_zone.anchor_bottom = 1.0
-	look_zone.offset_bottom = -128
+	look_zone.offset_bottom = -clearance
 	look_zone.mouse_filter = Control.MOUSE_FILTER_STOP
 	look_zone.gui_input.connect(_on_look_zone_input)
 	add_child(look_zone)
+	_look_zone = look_zone
+
+
+## gui_input delivers positions in the zone's LOCAL coordinates; the
+## player's screen-point actions need viewport coordinates.
+func _to_viewport(local_pos: Vector2) -> Vector2:
+	if _look_zone == null:
+		return local_pos
+	return _look_zone.get_global_transform() * local_pos
 
 
 func _make_button(text: String, font_size: int) -> Button:
@@ -152,67 +236,63 @@ func _make_button(text: String, font_size: int) -> Button:
 	return button
 
 
-func _place_bottom_right(button: Button, left: float, top: float, right: float, bottom: float) -> void:
-	button.anchor_left = 1.0
+## Place a button by its distance from the look-side bottom corner, so
+## the cluster mirrors with the handedness setting.
+func _place_corner(button: Button, from_side: float, from_bottom: float,
+		width: float, height: float) -> void:
+	if _left_handed:
+		button.anchor_left = 0.0
+		button.anchor_right = 0.0
+		button.offset_left = from_side
+		button.offset_right = from_side + width
+	else:
+		button.anchor_left = 1.0
+		button.anchor_right = 1.0
+		button.offset_left = -(from_side + width)
+		button.offset_right = -from_side
 	button.anchor_top = 1.0
-	button.anchor_right = 1.0
 	button.anchor_bottom = 1.0
-	button.offset_left = left
-	button.offset_top = top
-	button.offset_right = right
-	button.offset_bottom = bottom
+	button.offset_top = -(from_bottom + height)
+	button.offset_bottom = -from_bottom
 	add_child(button)
 
 
 func _build_buttons() -> void:
 	var jump_btn := _make_button("JUMP", 19)
-	_place_bottom_right(jump_btn, -120, -248, -24, -152)
+	_place_corner(jump_btn, 24, 152, 96, 96)
 	jump_btn.button_down.connect(_on_jump_down)
 	jump_btn.button_up.connect(_on_jump_up)
 
-	var mine_btn := _make_button("MINE", 16)
-	_place_bottom_right(mine_btn, -216, -240, -136, -160)
-	mine_btn.button_down.connect(_on_mine_down)
-	mine_btn.button_up.connect(func() -> void: Input.action_release("mine"))
-
-	var place_btn := _make_button("PLACE", 15)
-	_place_bottom_right(place_btn, -216, -336, -136, -256)
-	place_btn.button_down.connect(_on_place_down)
-	place_btn.button_up.connect(func() -> void: Input.action_release("place"))
-
 	_down_btn = _make_button("DOWN", 13)
-	_place_bottom_right(_down_btn, -304, -236, -232, -164)
+	_place_corner(_down_btn, 232, 164, 72, 72)
 	_down_btn.button_down.connect(func() -> void: Input.action_press("fly_down"))
 	_down_btn.button_up.connect(func() -> void: Input.action_release("fly_down"))
 	_down_btn.visible = false
 
 	var fly_btn := _make_button("FLY", 13)
-	_place_bottom_right(fly_btn, -88, -420, -28, -360)
+	_place_corner(fly_btn, 28, 360, 60, 60)
 	fly_btn.pressed.connect(func() -> void:
 		if _player != null:
 			_player.toggle_fly())
 
 	var lamp_btn := _make_button("LAMP", 13)
-	_place_bottom_right(lamp_btn, -156, -420, -96, -360)
+	_place_corner(lamp_btn, 96, 360, 60, 60)
 	lamp_btn.pressed.connect(func() -> void:
 		if _player != null:
 			_player.set_flashlight(not _player.flashlight_on))
 
-	var run_btn := _make_button("RUN", 13)
-	_place_bottom_right(run_btn, -224, -420, -164, -360)
-	run_btn.toggle_mode = true
-	run_btn.toggled.connect(func(on: bool) -> void:
-		if on:
-			Input.action_press("sprint")
-		else:
-			Input.action_release("sprint"))
-
 	var pause_btn := _make_button("II", 16)
-	pause_btn.anchor_left = 1.0
-	pause_btn.anchor_right = 1.0
-	pause_btn.offset_left = -72
+	if _left_handed:
+		pause_btn.anchor_left = 0.0
+		pause_btn.anchor_right = 0.0
+		pause_btn.offset_left = 16
+		pause_btn.offset_right = 72
+	else:
+		pause_btn.anchor_left = 1.0
+		pause_btn.anchor_right = 1.0
+		pause_btn.offset_left = -72
+		pause_btn.offset_right = -16
 	pause_btn.offset_top = 14
-	pause_btn.offset_right = -16
 	pause_btn.offset_bottom = 70
 	add_child(pause_btn)
 	pause_btn.pressed.connect(func() -> void:
@@ -250,28 +330,44 @@ func _update_joystick(pos: Vector2) -> void:
 		_player.touch_move = offset / JOY_RADIUS
 
 
+## Look-zone gestures (issue #3): a quick, still tap places a block at
+## the tap point; holding still starts mining the block under the
+## finger, and the target follows the finger while held; moving early
+## makes it a look-drag instead. Only the first finger is tracked —
+## extra fingers are ignored.
 func _on_look_zone_input(event: InputEvent) -> void:
-	if event is InputEventScreenDrag and _player != null:
-		_player.touch_look(event.relative)
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			if _look_id == -1:
+				_look_id = event.index
+				_press_pos = event.position
+				_press_msec = Time.get_ticks_msec()
+				_press_dragging = false
+				_mining = false
+		elif event.index == _look_id:
+			if _mining:
+				_mining = false
+			elif not _press_dragging \
+					and Time.get_ticks_msec() - _press_msec <= TAP_MAX_MS:
+				if _player != null:
+					_player.touch_action_at(false, _to_viewport(event.position))
+			_look_id = -1
+	elif event is InputEventScreenDrag and event.index == _look_id:
+		if _mining:
+			_mine_pos = _to_viewport(event.position)
+		elif _press_dragging:
+			if _player != null:
+				_player.touch_look(event.relative)
+		elif event.position.distance_to(_press_pos) > TAP_MAX_MOVE:
+			_press_dragging = true
+			if _player != null:
+				_player.touch_look(event.relative)
 
 
 func _on_jump_down() -> void:
-	_jump_fly = _player != null and _player.flying
-	Input.action_press("fly_up" if _jump_fly else "jump")
+	Input.action_press("fly_up" if _player != null and _player.flying else "jump")
 
 
 func _on_jump_up() -> void:
 	Input.action_release("fly_up")
 	Input.action_release("jump")
-
-
-func _on_mine_down() -> void:
-	if _player != null:
-		_player.touch_action(true)
-	Input.action_press("mine")
-
-
-func _on_place_down() -> void:
-	if _player != null:
-		_player.touch_action(false)
-	Input.action_press("place")
