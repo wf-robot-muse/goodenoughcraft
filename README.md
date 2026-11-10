@@ -29,6 +29,17 @@ profile export/import for backups and syncing.
   single trigger pull used to repeat ~3 times); mouse hold-to-repeat
   continues at a slower rate.
 
+**v0.2.4: the Windows executable is now code-signed.**
+- CI signs `GoodEnoughCraft.exe` on every build with the project
+  owner's self-signed code-signing certificate and fails the build if
+  the signature's fingerprint doesn't match the published one. The
+  certificate fingerprint and verification steps are in
+  [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) — the signature is
+  tamper evidence (the file is provably the one CI built), though as a
+  self-signed certificate it does not by itself clear SmartScreen's
+  "unrecognized publisher" warnings.
+- No gameplay changes.
+
 **v0.2.3: Fire HD 10 test fixes — Minecraft-style touch gestures,
 readable UI at any screen size.**
 - **Fixed:** the pause menu could open but not be tapped (a full-screen
@@ -172,16 +183,22 @@ Notes inherited from the foundation:
   Android and on 64-bit **Fire OS 7/8** tablets (e.g. Fire HD 10, 2019+):
   enable "Apps from Unknown Sources" on the tablet and install the APK
   directly — no Google Play Services are required.
-- Windows builds are currently unsigned: SmartScreen and antivirus
-  heuristics may warn on first run (Microsoft Defender's machine-learning
-  model flagged the v0.2.1 zip as `Trojan:Script/Wacatac.B!ml` — a false
-  positive; the release zip's SHA-256 in the release notes is the
-  authoritative check). Signing is **prepared** via SignPath
-  Foundation's free open-source program — see
-  [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md). It activates when the
-  project is approved and the workflow's `SIGNPATH_ENABLED` variable is
-  set; until then the `sign-windows` CI job stays dormant. macOS builds
-  are also unsigned (Gatekeeper warns on first run).
+- The Windows executable is **signed in CI with the project owner's
+  self-signed code-signing certificate** (repo secrets
+  `WINDOWS_CERT_BASE64`, `WINDOWS_CERT_PASSWORD`, applied with
+  osslsigncode plus an RFC 3161 timestamp). The build fails if the
+  signature's fingerprint does not match the fingerprint published in
+  [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md), which also explains
+  how to verify a download. Note the signature is tamper evidence, not
+  CA trust: SmartScreen and antivirus heuristics may still warn on
+  first run, because a self-signed certificate has no CA chain
+  (Microsoft Defender's machine-learning model flagged the unsigned
+  v0.2.1 zip as `Trojan:Script/Wacatac.B!ml` — a false positive; the
+  release zip's SHA-256 in the release notes remains an authoritative
+  check). The project applied to SignPath Foundation's free
+  open-source signing program in November 2026 and was declined, which
+  is why releases are self-signed for now. macOS builds are unsigned
+  (Gatekeeper warns on first run).
 
 ## License
 
