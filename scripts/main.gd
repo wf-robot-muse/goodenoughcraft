@@ -18,6 +18,7 @@ const PauseMenuScript := preload("res://scripts/pause_menu.gd")
 const TouchControlsScript := preload("res://scripts/touch_controls.gd")
 
 const DAY_LENGTH := 600.0 # seconds per full day/night cycle
+const FIXED_DAY_TIME := 0.5 # noon, used while the optional cycle is off
 const AUTOSAVE_INTERVAL := 30.0
 
 var terrain: VoxelLodTerrain
@@ -176,7 +177,11 @@ func _quit_to_title() -> void:
 
 
 func _process(delta: float) -> void:
-	time_of_day = fmod(time_of_day + delta / DAY_LENGTH, 1.0)
+	# Fire build issue #11: the cycle is optional and off by default.
+	# The stored time is preserved while off, so turning the cycle back
+	# on resumes from the world's saved time.
+	if Game.day_night_cycle_enabled():
+		time_of_day = fmod(time_of_day + delta / DAY_LENGTH, 1.0)
 	_apply_time_of_day()
 	_save_timer += delta
 	if _save_timer >= AUTOSAVE_INTERVAL:
@@ -187,9 +192,12 @@ func _process(delta: float) -> void:
 func _apply_time_of_day() -> void:
 	if _sun == null or _environment == null:
 		return
-	var sun_elev := sin((time_of_day - 0.25) * TAU)
+	var display_time := time_of_day
+	if not Game.day_night_cycle_enabled():
+		display_time = FIXED_DAY_TIME
+	var sun_elev := sin((display_time - 0.25) * TAU)
 	var daylight := clampf(sun_elev * 1.8 + 0.25, 0.0, 1.0)
-	_sun.rotation_degrees = Vector3(-((time_of_day - 0.25) * 360.0), -30.0, 0.0)
+	_sun.rotation_degrees = Vector3(-((display_time - 0.25) * 360.0), -30.0, 0.0)
 	_sun.light_energy = clampf(sun_elev * 1.8, 0.02, 1.0)
 	var warmth := clampf(sun_elev * 2.0, 0.0, 1.0)
 	_sun.light_color = Color(1.0, lerpf(0.55, 1.0, warmth), lerpf(0.35, 0.95, warmth))
