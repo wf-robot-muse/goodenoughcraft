@@ -15,7 +15,7 @@ extends Node
 ## smoke test), a throwaway dev context under user://dev_world is used.
 
 const SAVE_FORMAT_VERSION := 2
-const GAME_VERSION := "0.2.5"
+const GAME_VERSION := "0.2.6"
 
 signal settings_changed
 
@@ -99,8 +99,20 @@ var _music_player: AudioStreamPlayer
 var _sfx_players: Array[AudioStreamPlayer] = []
 var _sfx_streams: Dictionary = {}
 
-const SFX_NAMES := ["dig", "place", "break", "step", "splash", "ui_click"]
+const SFX_FAMILIES := ["earth", "sand", "stone", "wood", "plant", "glass"]
+const SFX_NAMES := ["dig", "place", "break", "step", "splash", "ui_click", "pop"]
+## Built-in music styles (Fire build issue #14): settings value ->
+## generated track. "custom" (the user's own files) and "off" are
+## handled separately by the music manager below.
+const MUSIC_TRACKS := {
+	"meadow": "res://assets/audio/music_ambient.wav",
+	"pines": "res://assets/audio/music_pines.wav",
+	"shore": "res://assets/audio/music_shore.wav",
+}
 const SYNC_PATH := "user://sync.json"
+
+var _music_style_playing := ""
+var _custom_index := 0
 
 
 func _ready() -> void:
@@ -119,7 +131,12 @@ func _input(event: InputEvent) -> void:
 
 
 func _setup_audio() -> void:
-	for sfx_name in SFX_NAMES:
+	var names: Array = SFX_NAMES.duplicate()
+	for family in SFX_FAMILIES:
+		names.append("hit_" + family)
+		names.append("break_" + family)
+		names.append("place_" + family)
+	for sfx_name in names:
 		var path: String = "res://assets/audio/" + sfx_name + ".wav"
 		if ResourceLoader.exists(path):
 			_sfx_streams[sfx_name] = load(path)
@@ -131,17 +148,114 @@ func _setup_audio() -> void:
 	_music_player = AudioStreamPlayer.new()
 	_music_player.bus = "Music"
 	add_child(_music_player)
-	var music_path := "res://assets/audio/music_ambient.wav"
-	if ResourceLoader.exists(music_path):
-		var music_stream := load(music_path) as AudioStreamWAV
-		if music_stream != null:
-			# Loop the ambient track (set in code: the WAV importer's
-			# loop setting does not survive headless reimports).
-			music_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
-			music_stream.loop_begin = 0
-			music_stream.loop_end = int(music_stream.get_length() * music_stream.mix_rate)
-		_music_player.stream = music_stream
+	_music_player.finished.connect(_on_music_finished)
+	_refresh_music()
+
+
+func music_style() -> String:
+	return str(settings.get("music_style", "meadow"))
+
+
+func set_music_style(style: String) -> void:
+	settings["music_style"] = style
+	save_settings()
+	settings_changed.emit()
+	_refresh_music()
+
+
+## The user's own music files for the "custom" style (issue #14).
+## Choosing files switches the style to custom automatically.
+func set_music_files(paths: Array) -> void:
+	var cleaned: Array = []
+	for path in paths:
+		cleaned.append(str(path))
+	settings["music_files"] = cleaned
+	settings["music_style"] = "custom"
+	save_settings()
+	settings_changed.emit()
+	_custom_index = 0
+	_refresh_music()
+
+
+func custom_music_files() -> Array:
+	var out: Array = []
+	for path in settings.get("music_files", []):
+		if FileAccess.file_exists(str(path)):
+			out.append(str(path))
+	return out
+
+
+## (Re)start music playback for the current style. Built-in tracks
+## loop; custom files play as a playlist, advancing on each track's
+## end; a custom list that is empty or unreadable falls back to the
+## default built-in track so the game is never silently musicless.
+func _refresh_music() -> void:
+	if _music_player == null:
+		return
+	var style := music_style()
+	if style == "off":
+		_music_player.stop()
+		_music_style_playing = "off"
+		return
+	if style == "custom":
+		var files := custom_music_files()
+		if not files.is_empty():
+			_custom_index = clampi(_custom_index, 0, files.size() - 1)
+			var stream := _load_external_audio(files[_custom_index])
+			if stream != null:
+				_music_player.stream = stream
+				_music_player.play()
+				_music_style_playing = "custom"
+				return
+		style = "meadow" # fall through to the default built-in
+	if _music_style_playing == style and _music_player.playing:
+		return
+	var path: String = MUSIC_TRACKS.get(style, MUSIC_TRACKS["meadow"])
+	if not ResourceLoader.exists(path):
+		return
+	var music_stream := load(path) as AudioStreamWAV
+	if music_stream == null:
+		return
+	# Loop the track (set in code: the WAV importer's loop setting
+	# does not survive headless reimports).
+	music_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	music_stream.loop_begin = 0
+	music_stream.loop_end = int(music_stream.get_length() * music_stream.mix_rate)
+	_music_player.stream = music_stream
+	_music_player.play()
+	_music_style_playing = style
+
+
+func _on_music_finished() -> void:
+	if _music_style_playing != "custom":
+		return
+	var files := custom_music_files()
+	if files.is_empty():
+		_refresh_music()
+		return
+	_custom_index = (_custom_index + 1) % files.size()
+	var stream := _load_external_audio(files[_custom_index])
+	if stream != null:
+		_music_player.stream = stream
 		_music_player.play()
+
+
+func _load_external_audio(path: String) -> AudioStream:
+	match path.get_extension().to_lower():
+		"mp3":
+			return AudioStreamMP3.load_from_file(path)
+		"ogg":
+			return AudioStreamOggVorbis.load_from_file(path)
+		"wav":
+			return AudioStreamWAV.load_from_file(path)
+	return null
+
+
+## Block interaction sounds by material family (issue #15): kind is
+## "hit", "break", or "place".
+func play_block_sfx(kind: String, block_id: int) -> void:
+	play_sfx(kind + "_" + Blocks.material_family(block_id),
+		randf_range(0.94, 1.06))
 
 
 ## Play a sound effect from the pool (used by gameplay and UI alike).
@@ -370,6 +484,9 @@ func default_settings() -> Dictionary:
 		"hotbar_text_scale": 1.0,
 		"left_handed": false,
 		"day_night_cycle": false,
+		"music_style": "meadow",
+		"music_files": [],
+		"target_marking": "auto",
 	}
 
 
@@ -445,6 +562,7 @@ func save_settings() -> void:
 
 func _apply_settings() -> void:
 	_apply_volumes()
+	_refresh_music()
 	var bindings: Dictionary = settings.get("bindings", {})
 	for action in DEFAULT_BINDINGS.keys():
 		_erase_action(action)

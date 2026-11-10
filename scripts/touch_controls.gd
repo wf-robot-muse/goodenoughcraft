@@ -48,6 +48,24 @@ var _press_dragging := false
 var _mining := false
 var _mine_pos := Vector2.ZERO
 
+## Minecraft's touch break-progress indicator (issue #15): a ring at
+## the finger that fills as the block cracks. Drawn by an inner-class
+## full-screen control sitting behind the zones and buttons.
+class ProgressRing:
+	extends Control
+	var active := false
+	var center := Vector2.ZERO
+	var fraction := 0.0
+
+	func _draw() -> void:
+		if not active:
+			return
+		draw_arc(center, 27.0, 0.0, TAU, 40, Color(1, 1, 1, 0.30), 8.0, true)
+		draw_arc(center, 27.0, -PI / 2.0, -PI / 2.0 + fraction * TAU, 40,
+			Color(1, 1, 1, 0.95), 8.0, true)
+
+var _ring: ProgressRing
+
 
 func _ready() -> void:
 	layer = 2
@@ -122,6 +140,14 @@ func _process(_delta: float) -> void:
 			_player.touch_mine_begin(_mine_pos)
 	elif _mining and _player != null:
 		_player.touch_mine_update(_mine_pos)
+	if _ring != null:
+		var show_ring := _mining and _player != null \
+			and str(Game.settings.get("target_marking", "auto")) != "off"
+		_ring.active = show_ring
+		if show_ring:
+			_ring.center = _mine_pos
+			_ring.fraction = _player.mining_fraction()
+		_ring.queue_redraw()
 
 
 func _release_all() -> void:
@@ -146,6 +172,10 @@ func _build_all() -> void:
 	for child in get_children():
 		child.queue_free()
 	_down_btn = null
+	_ring = ProgressRing.new()
+	_ring.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_ring)
 	_build_zones()
 	_build_buttons()
 

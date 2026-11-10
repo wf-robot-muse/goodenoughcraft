@@ -127,6 +127,32 @@ static func break_seconds(id: int) -> float:
 	return float(BREAK_SECONDS.get(id, 1.0))
 
 
+## Sound/feel family per block (Fire build issue #15): Minecraft gives
+## each material its own hit, break, and place sounds. Ids map to the
+## family names used by the generated SFX files (hit_<family>.wav ...).
+const MATERIAL_FAMILIES := {
+	GRASS: "earth",
+	SNOW_GRASS: "earth",
+	DIRT: "earth",
+	SAND: "sand",
+	STONE: "stone",
+	COBBLE: "stone",
+	BRICK: "stone",
+	COAL_ORE: "stone",
+	IRON_ORE: "stone",
+	GOLD_ORE: "stone",
+	LOG: "wood",
+	PLANKS: "wood",
+	LEAVES: "plant",
+	CACTUS: "plant",
+	GLASS: "glass",
+}
+
+
+static func material_family(id: int) -> String:
+	return str(MATERIAL_FAMILIES.get(id, "earth"))
+
+
 static func block_name(id: int) -> String:
 	if DEFS.has(id):
 		return DEFS[id][0]

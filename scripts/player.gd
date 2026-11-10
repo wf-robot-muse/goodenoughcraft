@@ -45,6 +45,28 @@ var _head: Node3D
 var _camera: Camera3D
 var _lamp: SpotLight3D
 var _tool: VoxelTool
+# Effects parity with the original game (Fire build issue #15):
+# a visible swinging hand holding the selected block, per-material
+# hit/break/place sounds, crack + burst particles, target marking,
+# and decorative item drops (option A: pickup is visual only).
+var _hand: Node3D
+var _hand_base_pos := Vector3(0.46, -0.44, -0.8)
+var _held_cube: MeshInstance3D
+var _held_block_id := -1
+var _tile_materials: Dictionary = {} # block id -> StandardMaterial3D
+var _swing_t := 0.0
+var _swing_hits := 0
+var _place_swing_t := -1.0
+var _outline: MeshInstance3D
+var _highlight: MeshInstance3D
+var _crack_particles: GPUParticles3D
+var _burst_particles: GPUParticles3D
+var _crack_particle_mat: StandardMaterial3D
+var _burst_particle_mat: StandardMaterial3D
+var _mine_face_point := Vector3.ZERO
+var _drops: Array = [] # {node, vel, age, flying}
+const SWING_PERIOD := 0.30
+const MAX_DROPS := 24
 var _crack: MeshInstance3D
 var _crack_material: StandardMaterial3D
 var _crack_textures: Array[Texture2D] = []
@@ -100,6 +122,10 @@ func _ready() -> void:
 	add_child(viewer)
 
 	_build_crack_overlay()
+	_build_hand()
+	_build_target_marking()
+	_build_particles()
+	selection_changed.connect(func(_i: int) -> void: _refresh_held_block())
 
 
 func selected_block() -> int:
@@ -336,6 +362,8 @@ func _physics_process(delta: float) -> void:
 		velocity.z = wish.z * speed
 	move_and_slide()
 
+	_update_target_marking()
+
 	# Footsteps while walking on solid ground.
 	var flat_distance := Vector2(
 		global_position.x - _last_pos.x, global_position.z - _last_pos.z).length()
@@ -427,17 +455,38 @@ func _update_mining(delta: float) -> void:
 	if _mine_delay > 0.0:
 		_mine_delay -= delta
 		_hide_crack()
+		if _crack_particles != null:
+			_crack_particles.emitting = false
 		return
+
+	# Effects (#15): the hand swings on a steady rhythm while mining;
+	# each swing lands a per-material hit sound, and crack particles
+	# chip off the struck face.
+	_swing_t += delta
+	var swing_index := int(_swing_t / SWING_PERIOD)
+	if swing_index != _swing_hits:
+		_swing_hits = swing_index
+		Game.play_block_sfx("hit", block_id)
+	_mine_face_point = Vector3(hit.position) + Vector3(0.5, 0.5, 0.5) \
+		+ Vector3(hit.previous_position - hit.position) * 0.52
+	if _crack_particles != null:
+		_crack_particle_mat.albedo_color = Blocks.block_color(block_id)
+		_crack_particles.global_position = _mine_face_point
+		_crack_particles.emitting = true
 
 	_mine_progress += delta
 	var needed := Blocks.break_seconds(block_id)
 	if _mine_progress >= needed:
 		_tool.set_voxel(hit.position, Blocks.AIR)
-		Game.play_sfx("break", randf_range(0.92, 1.08))
+		Game.play_block_sfx("break", block_id)
+		_burst_at(hit.position, block_id)
+		_spawn_drop(block_id, hit.position)
 		_mine_progress = 0.0
 		_mine_delay = NEXT_BLOCK_DELAY
 		_mine_cell_valid = false
 		_hide_crack()
+		if _crack_particles != null:
+			_crack_particles.emitting = false
 		return
 	_show_crack(hit.position, int(_mine_progress / needed * 10.0))
 
@@ -446,7 +495,11 @@ func _reset_mining() -> void:
 	_mine_progress = 0.0
 	_mine_delay = 0.0
 	_mine_cell_valid = false
+	_swing_t = 0.0
+	_swing_hits = 0
 	_hide_crack()
+	if _crack_particles != null:
+		_crack_particles.emitting = false
 
 
 func _build_crack_overlay() -> void:
@@ -498,6 +551,290 @@ func _make_crack_textures() -> Array[Texture2D]:
 	return textures
 
 
+# ------------------------------------------------------ effects (#15)
+
+## The material used for the held block and the decorative drops:
+## the block's atlas side tile on a small cube.
+func _tile_material(block_id: int) -> Material:
+	if _tile_materials.has(block_id):
+		return _tile_materials[block_id]
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load(Blocks.ATLAS_PATH) as Texture2D
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
+	mat.roughness = 1.0
+	var tiles: Array = Blocks.TILES.get(block_id, [Vector2i.ZERO])
+	var tile: Vector2i = tiles[0]
+	mat.uv1_scale = Vector3(1.0 / Blocks.ATLAS_SIZE.x, 1.0 / Blocks.ATLAS_SIZE.y, 1.0)
+	mat.uv1_offset = Vector3(float(tile.x) / Blocks.ATLAS_SIZE.x,
+		float(tile.y) / Blocks.ATLAS_SIZE.y, 0.0)
+	_tile_materials[block_id] = mat
+	return mat
+
+
+func _build_hand() -> void:
+	_hand = Node3D.new()
+	_hand.position = _hand_base_pos
+	_hand.rotation = Vector3(0.12, -0.22, 0.0)
+	_camera.add_child(_hand)
+	var arm := MeshInstance3D.new()
+	var arm_mesh := BoxMesh.new()
+	arm_mesh.size = Vector3(0.17, 0.17, 0.52)
+	arm.mesh = arm_mesh
+	arm.position = Vector3(0.06, -0.07, 0.22)
+	var skin := StandardMaterial3D.new()
+	skin.albedo_color = Color(0.78, 0.58, 0.42)
+	skin.roughness = 1.0
+	arm_mesh.material = skin
+	arm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_hand.add_child(arm)
+	_held_cube = MeshInstance3D.new()
+	var cube := BoxMesh.new()
+	cube.size = Vector3(0.34, 0.34, 0.34)
+	_held_cube.mesh = cube
+	_held_cube.position = Vector3(-0.03, 0.04, -0.30)
+	_held_cube.rotation = Vector3(0.3, 0.5, 0.0)
+	_held_cube.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_hand.add_child(_held_cube)
+	_refresh_held_block()
+
+
+func _refresh_held_block() -> void:
+	if _held_cube == null:
+		return
+	var id := selected_block()
+	if id == _held_block_id:
+		return
+	_held_block_id = id
+	(_held_cube.mesh as BoxMesh).material = _tile_material(id)
+
+
+## Hand animation: an idle sway, a repeating swing while mining
+## (driven by _swing_t, which also times the hit sounds), and a
+## single swing for each placement.
+func _process(delta: float) -> void:
+	_update_drops(delta)
+	if _hand == null:
+		return
+	_refresh_held_block()
+	var phase := -1.0
+	if _place_swing_t >= 0.0:
+		_place_swing_t += delta
+		phase = _place_swing_t / 0.22
+		if phase >= 1.0:
+			_place_swing_t = -1.0
+			phase = -1.0
+	elif _mine_cell_valid and _mine_delay <= 0.0:
+		phase = fmod(_swing_t, SWING_PERIOD) / SWING_PERIOD
+	var sway := sin(Time.get_ticks_msec() / 1000.0 * 1.6) * 0.006
+	_hand.position = _hand_base_pos + Vector3(sway, sway * 0.6, 0.0)
+	_hand.rotation = Vector3(0.12, -0.22, 0.0)
+	if phase >= 0.0:
+		var arc := sin(phase * PI)
+		_hand.rotation.x = 0.12 - arc * 0.85
+		_hand.position += Vector3(0.0, -arc * 0.10, -arc * 0.18)
+
+
+func _build_target_marking() -> void:
+	# Wireframe cube outline (crosshair modes), built from line strips.
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	var c := 0.53
+	var corners: Array[Vector3] = []
+	for x in [-c, c]:
+		for y in [-c, c]:
+			for z in [-c, c]:
+				corners.append(Vector3(x, y, z))
+	var edges := [[0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3],
+		[2, 6], [3, 7], [4, 5], [4, 6], [5, 7], [6, 7]]
+	for edge in edges:
+		mesh.surface_add_vertex(corners[edge[0]])
+		mesh.surface_add_vertex(corners[edge[1]])
+	mesh.surface_end()
+	var outline_mat := StandardMaterial3D.new()
+	outline_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	outline_mat.albedo_color = Color(1, 1, 1, 0.9)
+	outline_mat.no_depth_test = false
+	_outline = MeshInstance3D.new()
+	_outline.mesh = mesh
+	_outline.material_override = outline_mat
+	_outline.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_outline.top_level = true
+	_outline.visible = false
+	add_child(_outline)
+	# Translucent highlight cube (touch mode — the block brightens).
+	var hi_mat := StandardMaterial3D.new()
+	hi_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hi_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hi_mat.albedo_color = Color(1, 1, 1, 0.16)
+	var hi_mesh := BoxMesh.new()
+	hi_mesh.size = Vector3(1.03, 1.03, 1.03)
+	hi_mesh.material = hi_mat
+	_highlight = MeshInstance3D.new()
+	_highlight.mesh = hi_mesh
+	_highlight.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_highlight.top_level = true
+	_highlight.visible = false
+	add_child(_highlight)
+
+
+## Minecraft's target marking, styled by the Interface setting:
+## touch play highlights the block; crosshair play outlines it.
+func _update_target_marking() -> void:
+	if _outline == null or terrain == null or _camera == null:
+		return
+	var style := str(Game.settings.get("target_marking", "auto"))
+	if style == "off":
+		_outline.visible = false
+		_highlight.visible = false
+		return
+	var cell := Vector3i.ZERO
+	var have := false
+	var touch_context := _touch_mode
+	if _touch_mining and _mine_cell_valid:
+		cell = _mine_cell
+		have = true
+	elif not _touch_mode:
+		if _tool == null:
+			_tool = terrain.get_voxel_tool()
+			_tool.channel = VoxelBuffer.CHANNEL_TYPE
+		var hit := _tool.raycast(_camera.global_position,
+			-_camera.global_transform.basis.z, REACH)
+		if hit != null:
+			var id: int = _tool.get_voxel(hit.position)
+			if id != Blocks.AIR and id != Blocks.WATER:
+				cell = hit.position
+				have = true
+	if not have:
+		_outline.visible = false
+		_highlight.visible = false
+		return
+	var use_highlight := style == "highlight" or (style == "auto" and touch_context)
+	var center := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
+	_outline.visible = not use_highlight
+	_highlight.visible = use_highlight
+	if use_highlight:
+		_highlight.global_position = center
+	else:
+		_outline.global_position = center
+
+
+func _make_particle_node(amount: int, lifetime: float, one_shot: bool,
+		explosiveness: float, velocity_min: float, velocity_max: float,
+		gravity: float, fragment: float) -> GPUParticles3D:
+	var node := GPUParticles3D.new()
+	node.amount = amount
+	node.lifetime = lifetime
+	node.one_shot = one_shot
+	node.explosiveness = explosiveness
+	node.local_coords = false
+	node.visibility_aabb = AABB(Vector3(-40, -40, -40), Vector3(80, 80, 80))
+	var proc := ParticleProcessMaterial.new()
+	proc.direction = Vector3(0, 1, 0)
+	proc.spread = 60.0
+	proc.initial_velocity_min = velocity_min
+	proc.initial_velocity_max = velocity_max
+	proc.gravity = Vector3(0, gravity, 0)
+	proc.scale_min = 0.7
+	proc.scale_max = 1.4
+	node.process_material = proc
+	var mat := StandardMaterial3D.new()
+	mat.roughness = 1.0
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(fragment, fragment, fragment)
+	mesh.material = mat
+	node.draw_pass_1 = mesh
+	node.emitting = false
+	node.top_level = true
+	add_child(node)
+	return node
+
+
+func _build_particles() -> void:
+	_crack_particles = _make_particle_node(18, 0.38, false, 0.0, 0.7, 1.6, -5.0, 0.05)
+	_crack_particle_mat = (_crack_particles.draw_pass_1 as BoxMesh).material as StandardMaterial3D
+	_burst_particles = _make_particle_node(30, 0.55, true, 0.88, 1.8, 3.4, -9.8, 0.06)
+	_burst_particle_mat = (_burst_particles.draw_pass_1 as BoxMesh).material as StandardMaterial3D
+
+
+func _burst_at(cell: Vector3i, block_id: int) -> void:
+	if _burst_particles == null:
+		return
+	_burst_particle_mat.albedo_color = Blocks.block_color(block_id)
+	_burst_particles.global_position = Vector3(cell) + Vector3(0.5, 0.5, 0.5)
+	_burst_particles.restart()
+
+
+## Decorative drops (issue #15, Wade's option A): the mined block
+## pops out as a small spinning cube, bounces, then flies to the
+## player and vanishes with a pop. Purely visual — the hotbar stays
+## unlimited; Phase 3 survival turns this into a real inventory.
+func _spawn_drop(block_id: int, cell: Vector3i) -> void:
+	if _drops.size() >= MAX_DROPS:
+		var old: Dictionary = _drops.pop_front()
+		(old["node"] as Node).queue_free()
+	var node := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(0.32, 0.32, 0.32)
+	mesh.material = _tile_material(block_id)
+	node.mesh = mesh
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.top_level = true
+	add_child(node)
+	node.global_position = Vector3(cell) + Vector3(0.5, 0.6, 0.5)
+	var vel := Vector3(randf_range(-1.1, 1.1), 3.6, randf_range(-1.1, 1.1))
+	_drops.append({"node": node, "vel": vel, "age": 0.0, "flying": false})
+
+
+func _update_drops(delta: float) -> void:
+	if _drops.is_empty():
+		return
+	var chest := global_position + Vector3(0, 1.0, 0)
+	for i in range(_drops.size() - 1, -1, -1):
+		var drop: Dictionary = _drops[i]
+		var node := drop["node"] as MeshInstance3D
+		drop["age"] = float(drop["age"]) + delta
+		node.rotation.y += 2.6 * delta
+		if bool(drop["flying"]):
+			var to_player := chest - node.global_position
+			if to_player.length() < 0.45:
+				Game.play_sfx("pop", randf_range(0.95, 1.08))
+				node.queue_free()
+				_drops.remove_at(i)
+				continue
+			node.global_position += to_player.normalized() * 11.0 * delta
+			continue
+		if float(drop["age"]) > 0.55 and node.global_position.distance_to(chest) < 2.8:
+			drop["flying"] = true
+			continue
+		var vel := drop["vel"] as Vector3
+		vel.y -= 16.0 * delta
+		var pos := node.global_position + vel * delta
+		var probe_point := pos + Vector3(0, -0.22, 0)
+		var below := _voxel_at(probe_point)
+		if below != Blocks.AIR and below != Blocks.WATER and vel.y < 0.0:
+			# Rest on top of the solid cell the probe point is inside.
+			pos.y = floori(probe_point.y) + 1.0 + 0.18
+			vel.y = -vel.y * 0.35 if vel.y < -1.6 else 0.0
+			vel.x *= 0.7
+			vel.z *= 0.7
+		node.global_position = pos
+		drop["vel"] = vel
+
+
+## Progress through the current block's break time, for the touch
+## progress ring (touch_controls.gd). 0 when not mining.
+func mining_fraction() -> float:
+	if not _mine_cell_valid:
+		return 0.0
+	if _tool == null or terrain == null:
+		return 0.0
+	var id: int = _tool.get_voxel(_mine_cell)
+	var needed := Blocks.break_seconds(id)
+	if needed <= 0.0:
+		return 0.0
+	return clampf(_mine_progress / needed, 0.0, 1.0)
+
+
 func _show_crack(cell: Vector3i, stage: int) -> void:
 	if _crack == null or _crack_material == null:
 		return
@@ -533,8 +870,11 @@ func _try_action_ray(mine: bool, origin: Vector3, direction: Vector3) -> void:
 	if hit == null:
 		return
 	if mine:
+		var mined_id: int = _tool.get_voxel(hit.position)
 		_tool.set_voxel(hit.position, Blocks.AIR)
-		Game.play_sfx("break", randf_range(0.92, 1.08))
+		Game.play_block_sfx("break", mined_id)
+		_burst_at(hit.position, mined_id)
+		_spawn_drop(mined_id, hit.position)
 	else:
 		var cell: Vector3i = hit.previous_position
 		# Never place a block inside the player's own body.
@@ -543,4 +883,5 @@ func _try_action_ray(mine: bool, origin: Vector3, direction: Vector3) -> void:
 		if player_box.intersects(cell_box):
 			return
 		_tool.set_voxel(cell, selected_block())
-		Game.play_sfx("place", randf_range(0.95, 1.05))
+		Game.play_block_sfx("place", selected_block())
+		_place_swing_t = 0.0
