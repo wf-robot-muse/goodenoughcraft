@@ -97,7 +97,34 @@ const TILES := {
 # Hotbar slots in display order (hotbar_1 .. hotbar_10 actions).
 const HOTBAR: Array[int] = [GRASS, DIRT, STONE, COBBLE, LOG, PLANKS, LEAVES, SAND, BRICK, GLASS]
 
+## Bare-hand breaking times in seconds, using Minecraft's block values
+## (Fire build issue #10). Minecraft derives hand-breaking time from
+## hardness: hardness x 1.5 when the hand can harvest the block, or
+## hardness x 5 when a pickaxe is the proper tool. Water has no entry
+## because it cannot be mined.
+const BREAK_SECONDS := {
+	GRASS: 0.9,
+	STONE: 7.5,
+	DIRT: 0.75,
+	COBBLE: 10.0,
+	LOG: 3.0,
+	PLANKS: 3.0,
+	LEAVES: 0.3,
+	SAND: 0.75,
+	BRICK: 10.0,
+	COAL_ORE: 15.0,
+	IRON_ORE: 15.0,
+	GOLD_ORE: 15.0,
+	SNOW_GRASS: 0.9,
+	GLASS: 0.45,
+	CACTUS: 0.6,
+}
+
 static var _material: StandardMaterial3D
+
+
+static func break_seconds(id: int) -> float:
+	return float(BREAK_SECONDS.get(id, 1.0))
 
 
 static func block_name(id: int) -> String:
