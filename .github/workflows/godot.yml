@@ -88,6 +88,49 @@ jobs:
           mkdir -p build/windows
           "$GODOT_BIN" --headless --export-release "Windows Desktop" build/windows/GoodEnoughCraft.exe
 
+      # Windows releases are Authenticode-signed with the project owner's
+      # self-signed code-signing certificate (see CODE_SIGNING_POLICY.md
+      # for the published certificate fingerprint and what this signature
+      # does and does not guarantee). The PFX lives in repo secrets,
+      # mirroring the Android keystore setup. osslsigncode applies the
+      # signature from this Linux runner; the RFC 3161 timestamp keeps
+      # signatures verifiable after the certificate expires. The build
+      # fails if the signature is absent or the signer's fingerprint
+      # does not match the published one.
+      - name: Sign Windows executable (self-signed certificate)
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          EXPECTED_FINGERPRINT: "AF:FA:FC:91:08:15:72:F0:81:C9:F0:78:3A:59:59:5E:61:F4:BE:00:D8:F3:77:CA:55:82:DD:3D:52:CE:62:B3"
+        run: |
+          if [ -z "$WINDOWS_CERT_BASE64" ]; then
+            echo "::error::WINDOWS_CERT_BASE64 secret is not set"
+            exit 1
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq osslsigncode
+          echo "$WINDOWS_CERT_BASE64" | base64 -d > "$RUNNER_TEMP/windows-cert.pfx"
+          osslsigncode sign \
+            -pkcs12 "$RUNNER_TEMP/windows-cert.pfx" \
+            -pass "$WINDOWS_CERT_PASSWORD" \
+            -n "GoodEnoughCraft" \
+            -i "https://github.com/wf-robot-muse/goodenoughcraft" \
+            -ts "http://timestamp.digicert.com" \
+            -h sha256 \
+            -in build/windows/GoodEnoughCraft.exe \
+            -out build/windows/GoodEnoughCraft-signed.exe
+          mv build/windows/GoodEnoughCraft-signed.exe build/windows/GoodEnoughCraft.exe
+          openssl pkcs12 -in "$RUNNER_TEMP/windows-cert.pfx" -passin "pass:$WINDOWS_CERT_PASSWORD" -nokeys -clcerts -out "$RUNNER_TEMP/windows-cert.pem"
+          osslsigncode extract-signature -in build/windows/GoodEnoughCraft.exe -out "$RUNNER_TEMP/signature.p7"
+          openssl pkcs7 -inform DER -in "$RUNNER_TEMP/signature.p7" -print_certs -out "$RUNNER_TEMP/signer.pem"
+          ACTUAL_FINGERPRINT="$(openssl x509 -in "$RUNNER_TEMP/signer.pem" -noout -fingerprint -sha256 | cut -d= -f2)"
+          echo "Signer SHA-256 fingerprint: $ACTUAL_FINGERPRINT"
+          if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "::error::Signer fingerprint does not match the published fingerprint"
+            exit 1
+          fi
+          osslsigncode verify -in build/windows/GoodEnoughCraft.exe -CAfile "$RUNNER_TEMP/windows-cert.pem"
+          rm -f "$RUNNER_TEMP/windows-cert.pfx"
+
       - name: Export Linux
         run: |
           mkdir -p build/linux
@@ -129,77 +172,4 @@ jobs:
         with:
           name: goodenoughcraft-android
           path: build/android/*.apk
-          if-no-files-found: error
-
-  # Windows code signing via SignPath Foundation (free open-source
-  # program). This job is DORMANT: it only runs once the project has been
-  # approved by SignPath Foundation and the following are configured in
-  # the repository settings:
-  #   - variable SIGNPATH_ENABLED = "true"
-  #   - variable SIGNPATH_ORGANIZATION_ID  (SignPath organization ID)
-  #   - variable SIGNPATH_PROJECT_SLUG     (SignPath project slug)
-  #   - variable SIGNPATH_SIGNING_POLICY_SLUG
-  #   - secret   SIGNPATH_API_TOKEN        (submitter API token)
-  # In SignPath, the project's artifact configuration must treat the
-  # uploaded artifact as a ZIP archive whose root contains
-  # GoodEnoughCraft.exe and apply an Authenticode signature to that file.
-  # Only the executable is signed; the Voxel Tools DLL ships unsigned as
-  # released upstream. See CODE_SIGNING_POLICY.md.
-  sign-windows:
-    name: Sign Windows build (SignPath)
-    if: vars.SIGNPATH_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
-
-      - name: Download Godot editor and export templates
-        run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
-          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
-          chmod +x "$GODOT_BIN"
-          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
-          unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -d "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
-          # The .tpz nests everything under templates/; Godot expects it flat.
-          mv "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/templates/"* "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
-          "$GODOT_BIN" --version
-
-      - name: Import project (loads the Voxel Tools extension)
-        run: |
-          "$GODOT_BIN" --headless --import --path .
-
-      - name: Export Windows
-        run: |
-          mkdir -p build/windows
-          "$GODOT_BIN" --headless --export-release "Windows Desktop" build/windows/GoodEnoughCraft.exe
-
-      - name: Upload unsigned executable
-        id: upload-unsigned-exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: goodenoughcraft-windows-unsigned
-          path: build/windows/GoodEnoughCraft.exe
-          if-no-files-found: error
-
-      # The owner approves each signing request in SignPath; the wait
-      # timeout below spans the maximum GitHub-hosted job runtime, so
-      # approve promptly after triggering a release build.
-      - name: Submit signing request to SignPath
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          github-artifact-id: ${{ steps.upload-unsigned-exe.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 21600
-          output-artifact-directory: build/windows-signed
-
-      - name: Upload signed Windows build
-        uses: actions/upload-artifact@v4
-        with:
-          name: goodenoughcraft-windows-signed
-          path: build/windows-signed/
           if-no-files-found: error
