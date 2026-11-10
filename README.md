@@ -29,6 +29,24 @@ profile export/import for backups and syncing.
   single trigger pull used to repeat ~3 times); mouse hold-to-repeat
   continues at a slower rate.
 
+**v0.2.5: Minecraft-exact mining, opaque Settings, optional day/night.**
+- **Mining now breaks blocks the way Minecraft does** (Fire build
+  issue #10): hold on a block and cracks spread across it until it
+  breaks — each block type takes its real bare-hand time from
+  Minecraft (dirt 0.75 s, logs and planks 3 s, stone 7.5 s, ores
+  15 s, and so on). Releasing the hold or sliding to another block
+  resets the cracks; a short delay follows each break before the
+  next block starts cracking. This replaces the old fixed-rate
+  instant mining on touch, mouse, and gamepad alike. Placing is
+  unchanged, and water can no longer be mined away.
+- **Settings backgrounds are fully opaque** (issue #9): the Settings
+  panel uses an explicit solid backing on both the title screen and
+  the pause menu, so the world no longer shows through it.
+- **The day/night cycle is now a Settings option** (issue #11),
+  **off by default**: worlds stay at permanent noon until you turn
+  "Day/night cycle" on, which resumes the 10-minute cycle from the
+  world's saved time.
+
 **v0.2.4: the Windows executable is now code-signed.**
 - CI signs `GoodEnoughCraft.exe` on every build with the project
   owner's self-signed code-signing certificate and fails the build if
