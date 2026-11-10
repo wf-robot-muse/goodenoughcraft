@@ -15,7 +15,7 @@ extends Node
 ## smoke test), a throwaway dev context under user://dev_world is used.
 
 const SAVE_FORMAT_VERSION := 2
-const GAME_VERSION := "0.2.4"
+const GAME_VERSION := "0.2.5"
 
 signal settings_changed
 
@@ -369,6 +369,7 @@ func default_settings() -> Dictionary:
 		"hotbar_scale": 1.0,
 		"hotbar_text_scale": 1.0,
 		"left_handed": false,
+		"day_night_cycle": false,
 	}
 
 
@@ -420,6 +421,12 @@ func hotbar_text_factor() -> float:
 
 func left_handed() -> bool:
 	return bool(settings.get("left_handed", false))
+
+
+## Day/night cycling is optional and defaults OFF (Fire build issue
+## #11): with it off, worlds remain at permanent daytime.
+func day_night_cycle_enabled() -> bool:
+	return bool(settings.get("day_night_cycle", false))
 
 
 ## Auto-jump defaults ON for touch devices (Minecraft's platform
