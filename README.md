@@ -29,6 +29,30 @@ profile export/import for backups and syncing.
   single trigger pull used to repeat ~3 times); mouse hold-to-repeat
   continues at a slower rate.
 
+**v0.2.6: categorized Settings, music choices, Minecraft effects.**
+- **Settings is now organized into categories** (issue #16): a short
+  root page — Interface, Controls, Audio & Music, Gameplay, and
+  Profile & Data — each showing its current values, with one more tap
+  down to the options themselves. The panel is sized to the screen
+  and scrolls internally, so it can never again grow past the
+  display's edges (issue #12), and checkboxes and sliders carry a
+  high-contrast theme — an unchecked box is now plainly visible
+  (issue #13).
+- **Music choices** (issue #14): three built-in atmospheric styles
+  (Meadow Light, Deep Pines, Open Shore) plus **My Music** — pick
+  your own mp3/ogg/wav files in Settings and they play as a playlist —
+  or Off.
+- **Mining and placing now feel like Minecraft** (issue #15): your
+  hand is visible holding the selected block and swings as you mine
+  or place; every material has its own hit, break, and place sounds;
+  chips fly while you mine and the block bursts into particles when
+  it breaks; the targeted block is highlighted on touch and outlined
+  with the crosshair (Interface setting); touch mining shows the
+  filling progress ring at your finger; and a mined block pops out
+  as a little spinning item that flies to you — decoration only for
+  now, exactly as planned until the survival phase turns it into a
+  real inventory.
+
 **v0.2.5: Minecraft-exact mining, opaque Settings, optional day/night.**
 - **Mining now breaks blocks the way Minecraft does** (Fire build
   issue #10): hold on a block and cracks spread across it until it
