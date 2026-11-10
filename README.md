@@ -29,6 +29,25 @@ profile export/import for backups and syncing.
   single trigger pull used to repeat ~3 times); mouse hold-to-repeat
   continues at a slower rate.
 
+**v0.2.3: Fire HD 10 test fixes — Minecraft-style touch gestures,
+readable UI at any screen size.**
+- **Fixed:** the pause menu could open but not be tapped (a full-screen
+  settings wrapper was swallowing every tap); hotbar taps now actually
+  switch the selected block.
+- Touch controls now follow Minecraft Bedrock's "Joystick & tap to
+  interact" model: **tap** the view to place a block there, **hold**
+  to mine the block under your finger (it follows your finger),
+  drag to look, and push the joystick fully forward to **sprint**.
+  The MINE / PLACE / RUN buttons are gone; JUMP, FLY, LAMP, DOWN and
+  the pause button remain.
+- Menus and the HUD now scale with the display (high-DPI tablets get
+  proportionally larger text), with Settings sliders for **menu text
+  size**, **hotbar size**, and **hotbar text size**; the crosshair is
+  larger and outlined.
+- New Settings toggles: **left-handed touch controls** (mirrors the
+  touch layout) and **auto-jump** (step up one block automatically;
+  on by default on touch devices).
+
 **v0.2.2: touch controls + signed Android builds (for Fire HD tablets).**
 - On tablets, a touch layer appears automatically: a left-thumb
   virtual joystick for movement, drag on the right side of the screen
