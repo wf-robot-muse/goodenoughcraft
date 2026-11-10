@@ -15,7 +15,7 @@ extends Node
 ## smoke test), a throwaway dev context under user://dev_world is used.
 
 const SAVE_FORMAT_VERSION := 2
-const GAME_VERSION := "0.2.3"
+const GAME_VERSION := "0.2.4"
 
 signal settings_changed
 
