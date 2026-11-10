@@ -60,6 +60,8 @@ var _slots_back_target := "worlds"
 var _status_label: Label
 var _settings: SettingsUI
 var _settings_center: CenterContainer
+var _ui_root: Control
+var _scalables: Array[Control] = []
 var _export_dialog: FileDialog
 var _import_dialog: FileDialog
 var _osk: OnScreenKeyboard
@@ -160,6 +162,7 @@ func _build_ui() -> void:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(root)
+	_ui_root = root
 
 	# Front screen: just Start and Settings over the island view.
 	var front_center := CenterContainer.new()
@@ -248,6 +251,23 @@ func _build_ui() -> void:
 
 	_wire_osk_fields()
 	_wire_clicks(layer)
+
+	# Menu scaling (Fire build issue #4): the UI containers scale
+	# around the screen center by the display/user factor, so all
+	# title text and buttons grow together on high-DPI screens.
+	_scalables = [root, _settings_center, _osk_center]
+	for container in _scalables:
+		container.resized.connect(func() -> void:
+			container.pivot_offset = container.size * 0.5)
+	Game.settings_changed.connect(_apply_menu_scale)
+	_apply_menu_scale()
+
+
+func _apply_menu_scale() -> void:
+	var factor := Game.ui_factor()
+	for container in _scalables:
+		container.scale = Vector2.ONE * factor
+		container.pivot_offset = container.size * 0.5
 
 
 func _mk_button(text: String, on_press := Callable()) -> Button:
