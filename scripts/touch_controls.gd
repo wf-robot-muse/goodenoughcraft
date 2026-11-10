@@ -8,7 +8,8 @@ extends CanvasLayer
 ##   its rim sprints.
 ## - The other side: gestures — drag to look, tap to place a block at
 ##   the tap point, hold to mine the block under the finger (the mining
-##   target follows the finger while held).
+##   target follows the finger while held; breaking itself is timed
+##   per block by the player, Minecraft-style — issue #10).
 ## - Buttons on the look side: JUMP (doubles as fly-up while flying; a
 ##   DOWN button appears next to it in fly mode), FLY and LAMP
 ##   (flashlight) above it, and II at the top corner to pause.
@@ -24,7 +25,6 @@ const JOY_RADIUS := 62.0
 const TAP_MAX_MS := 300
 const TAP_MAX_MOVE := 18.0
 const HOLD_MS := 320
-const MINE_INTERVAL := 0.30
 
 var _player = null
 var _hud = null
@@ -47,7 +47,6 @@ var _press_msec := 0
 var _press_dragging := false
 var _mining := false
 var _mine_pos := Vector2.ZERO
-var _mine_timer := 0.0
 
 
 func _ready() -> void:
@@ -99,7 +98,7 @@ func _input(event: InputEvent) -> void:
 		_activate()
 
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if not _active:
 		return
 	var paused_now := get_tree().paused
@@ -112,19 +111,17 @@ func _process(delta: float) -> void:
 	if paused_now:
 		return
 	# Hold-to-mine: a press that stays put past the threshold becomes
-	# mining; a drag that starts moving first becomes look instead.
+	# timed mining in the player; a drag that starts moving first
+	# becomes look instead. While mining, keep feeding the current
+	# finger position so the target follows it.
 	if _look_id != -1 and not _mining and not _press_dragging \
 			and Time.get_ticks_msec() - _press_msec >= HOLD_MS:
 		_mining = true
 		_mine_pos = _to_viewport(_press_pos)
-		_mine_timer = MINE_INTERVAL
 		if _player != null:
-			_player.touch_action_at(true, _mine_pos)
-	if _mining and _player != null:
-		_mine_timer -= delta
-		if _mine_timer <= 0.0:
-			_player.touch_action_at(true, _mine_pos)
-			_mine_timer = MINE_INTERVAL
+			_player.touch_mine_begin(_mine_pos)
+	elif _mining and _player != null:
+		_player.touch_mine_update(_mine_pos)
 
 
 func _release_all() -> void:
@@ -132,6 +129,7 @@ func _release_all() -> void:
 		Input.action_release(action)
 	if _player != null:
 		_player.touch_move = Vector2.ZERO
+		_player.touch_mine_end()
 	_joy_id = -1
 	_look_id = -1
 	_mining = false
@@ -347,6 +345,8 @@ func _on_look_zone_input(event: InputEvent) -> void:
 		elif event.index == _look_id:
 			if _mining:
 				_mining = false
+				if _player != null:
+					_player.touch_mine_end()
 			elif not _press_dragging \
 					and Time.get_ticks_msec() - _press_msec <= TAP_MAX_MS:
 				if _player != null:
